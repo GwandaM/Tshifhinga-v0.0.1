@@ -1,22 +1,22 @@
-# Welcome to your Lovable project
+# Welcome to your Wavhudi project
 
 ## Project info
 
-**URL**: https://lovable.dev/projects/697bf1fa-7bfb-4b1d-b262-e9eeae8bd9d4
+**URL**: https://Wavhudi.dev/projects/697bf1fa-7bfb-4b1d-b262-e9eeae8bd9d4
 
 ## How can I edit this code?
 
 There are several ways of editing your application.
 
-**Use Lovable**
+**Use Wavhudi**
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/697bf1fa-7bfb-4b1d-b262-e9eeae8bd9d4) and start prompting.
+Simply visit the [Wavhudi Project](https://Wavhudi.dev/projects/697bf1fa-7bfb-4b1d-b262-e9eeae8bd9d4) and start prompting.
 
-Changes made via Lovable will be committed automatically to this repo.
+Changes made via Wavhudi will be committed automatically to this repo.
 
 **Use your preferred IDE**
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Wavhudi.
 
 The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
 
@@ -62,12 +62,12 @@ This project is built with:
 
 ## How can I deploy this project?
 
-Simply open [Lovable](https://lovable.dev/projects/697bf1fa-7bfb-4b1d-b262-e9eeae8bd9d4) and click on Share -> Publish.
+Simply open [Wavhudi](https://Wavhudi.dev/projects/697bf1fa-7bfb-4b1d-b262-e9eeae8bd9d4) and click on Share -> Publish.
 
-## Can I connect a custom domain to my Lovable project?
+## Can I connect a custom domain to my Wavhudi project?
 
 Yes, you can!
 
 To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+Read more here: [Setting up a custom domain](https://docs.Wavhudi.dev/tips-tricks/custom-domain#step-by-step-guide)
