@@ -28,14 +28,26 @@ const electronAPI = {
     getMode: () => ipcRenderer.invoke('window:get-mode'),
     setTransparency: (opacity) => ipcRenderer.invoke('window:set-transparency', opacity),
     getTransparency: () => ipcRenderer.invoke('window:get-transparency'),
+    // Auto-switch settings
+    getAutoSwitchSettings: () => ipcRenderer.invoke('window:get-auto-switch-settings'),
+    setAutoSwitch: (enabled) => ipcRenderer.invoke('window:set-auto-switch', enabled),
+    setAutoSwitchDelay: (delay) => ipcRenderer.invoke('window:set-auto-switch-delay', delay),
+    setAutoSwitchCondition: (onlyWhenRunning) => ipcRenderer.invoke('window:set-auto-switch-condition', onlyWhenRunning),
+    toggleMiniAlwaysOnTop: () => ipcRenderer.invoke('window:toggle-mini-always-on-top'),
+    getMiniAlwaysOnTopState: () => ipcRenderer.invoke('window:get-mini-always-on-top-state'),
   },
   timer: {
     onStateSync: (callback) => ipcRenderer.on('timer:state-sync', callback),
-    onTimerAction: (callback) => ipcRenderer.on('timer-action', callback),
-    sendStateChange: (timerState) => ipcRenderer.send('timer:state-changed', timerState),
-    removeAllListeners: () => {
-      ipcRenderer.removeAllListeners('timer:state-sync');
-      ipcRenderer.removeAllListeners('timer-action');
+    onTimerAction: (action, callback) => ipcRenderer.on(`timer-action-${action}`, callback),
+    start: (task) => ipcRenderer.send('timer:start', task),
+    pause: () => ipcRenderer.send('timer:pause'),
+    resume: () => ipcRenderer.send('timer:resume'),
+    stop: (notes) => ipcRenderer.send('timer:stop', notes),
+    setTask: (task) => ipcRenderer.send('timer:set-task', task),
+    getState: () => ipcRenderer.invoke('timer:get-state'),
+    adjustTime: (adjustment) => ipcRenderer.invoke('timer:adjust-time', adjustment),
+    removeAllListeners: (channel) => {
+      ipcRenderer.removeAllListeners(channel);
     }
   },
   showSaveDialog: (options) => ipcRenderer.invoke('showSaveDialog', options),

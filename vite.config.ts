@@ -1,15 +1,32 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
+import electron from "vite-plugin-electron";
+import renderer from "vite-plugin-electron-renderer";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
   server: {
-    host: "::",
+    host: "localhost",
     port: 8080,
   },
   plugins: [
     react(),
+    electron([
+      {
+        // Main-Process entry file of the Electron App.
+        entry: "src/electron/main.ts",
+      },
+      {
+        entry: "src/electron/preload.ts",
+        onstart(options) {
+          // Onstart hook work like server hook.
+          // Load a URL manually instead of the default.
+          options.startup();
+        },
+      },
+    ]),
+    renderer(),
   ],
   resolve: {
     alias: {

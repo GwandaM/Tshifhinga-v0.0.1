@@ -13,13 +13,27 @@ let mainWindow: any | null = null;
 let miniWindow: any | null = null;
 let tray: any | null = null;
 let systemSleepTime: number | null = null;
+let currentTimerState: any = {
+  status: 'stopped',
+  activeMs: 0,
+  pausedMs: 0,
+  startTs: null,
+  task: null
+};
+let timerInterval: NodeJS.Timeout | null = null;
 
 // Window state management
 let windowState = {
   mode: 'full', // 'full', 'mini', 'tray'
   mainWindowBounds: { width: 1200, height: 800, x: undefined, y: undefined },
-  miniWindowBounds: { width: 300, height: 150, x: undefined, y: undefined },
-  transparency: 0.95
+  miniWindowBounds: { width: 420, height: 42, x: undefined, y: undefined },
+  transparency: 0.95,
+  autoSwitch: {
+    enabled: false,
+    delay: 5000, // 5 seconds
+    onlyWhenRunning: true
+  },
+  miniAlwaysOnTop: true
 };
 
 const createMainWindow = (): void => {
@@ -88,10 +102,10 @@ const createMiniWindow = (): void => {
     height: windowState.miniWindowBounds.height,
     x: windowState.miniWindowBounds.x,
     y: windowState.miniWindowBounds.y,
-    minWidth: 280,
-    minHeight: 120,
-    maxWidth: 400,
-    maxHeight: 200,
+    minWidth: 380,
+    minHeight: 38,
+    maxWidth: 500,
+    maxHeight: 50,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -99,7 +113,7 @@ const createMiniWindow = (): void => {
       preload: pathJoin(__dirname, 'preload.js'),
     },
     frame: false,
-    alwaysOnTop: true,
+    alwaysOnTop: windowState.miniAlwaysOnTop,
     skipTaskbar: false,
     resizable: true,
     opacity: windowState.transparency,
@@ -116,6 +130,9 @@ const createMiniWindow = (): void => {
   // Show window when ready
   miniWindow.once('ready-to-show', () => {
     miniWindow.show();
+    // Ensure always on top is set correctly after window is ready
+    miniWindow.setAlwaysOnTop(windowState.miniAlwaysOnTop);
+    console.log('Mini window created with always on top:', windowState.miniAlwaysOnTop);
     windowState.mode = 'mini';
   });
 
@@ -142,9 +159,54 @@ const createMiniWindow = (): void => {
 };
 
 const createTray = (): void => {
-  // Create tray icon (you'll need to add an icon file)
-  const icon = nativeImage.createFromPath(pathJoin(__dirname, '../assets/tray-icon.png')).resize({ width: 16, height: 16 });
-  tray = new Tray(icon);
+  let icon;
+  try {
+    // Try to load the tray icon from multiple possible locations
+    const iconPaths = [
+      pathJoin(__dirname, '../assets/tray-icon.png'),
+      pathJoin(__dirname, '../public/favicon.ico'),
+      pathJoin((process as any).resourcesPath || __dirname, '../assets/tray-icon.png')
+    ];
+    
+    let iconLoaded = false;
+    for (const iconPath of iconPaths) {
+      try {
+        icon = nativeImage.createFromPath(iconPath);
+        if (!icon.isEmpty()) {
+          iconLoaded = true;
+          console.log('Tray icon loaded from:', iconPath);
+          break;
+        }
+      } catch (e) {
+        // Continue to next path
+      }
+    }
+    
+    if (!iconLoaded) {
+      console.warn('No tray icon found, using system default');
+    }
+    
+    // Check if icon was loaded successfully
+    if (!iconLoaded || icon.isEmpty()) {
+      // Create a simple fallback icon
+      icon = nativeImage.createEmpty();
+      // You could also use a system icon or create a simple programmatic icon
+      // For now, we'll use an empty icon which will show a default system icon
+    } else {
+      icon = icon.resize({ width: 16, height: 16 });
+    }
+  } catch (error) {
+    console.error('Error loading tray icon:', error);
+    // Create an empty icon as fallback
+    icon = nativeImage.createEmpty();
+  }
+
+  try {
+    tray = new Tray(icon);
+  } catch (error) {
+    console.error('Error creating system tray:', error);
+    return;
+  }
 
   const contextMenu = Menu.buildFromTemplate([
     {
@@ -181,15 +243,20 @@ const createTray = (): void => {
     }
   ]);
 
-  tray.setContextMenu(contextMenu);
-  tray.setToolTip('Tshifhinga Time Tracker');
+  if (tray) {
+    tray.setContextMenu(contextMenu);
+    tray.setToolTip('Tshifhinga Time Tracker');
 
-  // Double click to show mini window
-  tray.on('double-click', () => {
-    switchToMini();
-  });
+    // Double click to show mini window
+    tray.on('double-click', () => {
+      switchToMini();
+    });
 
-  windowState.mode = 'tray';
+    windowState.mode = 'tray';
+    console.log('System tray created successfully');
+  } else {
+    console.error('Failed to create system tray');
+  }
 };
 
 // Window state switching functions
@@ -232,17 +299,24 @@ const switchToTray = (): void => {
     miniWindow.hide();
   }
   
-  if (!tray) {
+  if (!tray || tray.isDestroyed()) {
     createTray();
   }
   
-  windowState.mode = 'tray';
+  if (tray && !tray.isDestroyed()) {
+    windowState.mode = 'tray';
+  } else {
+    console.error('Could not switch to tray mode - tray creation failed');
+    // Fallback to mini window if tray creation fails
+    switchToMini();
+  }
 };
 
 // App event listeners
-electronApp.whenReady().then(() => {
+electronApp.whenReady().then(async () => {
   // Initialize database
   dbService = new DatabaseService();
+  await dbService.init();
   
   // Create main window initially
   createMainWindow();
@@ -342,25 +416,198 @@ ipcMain.handle('window:get-transparency', () => {
   return windowState.transparency;
 });
 
-// IPC handlers for timer state sync
-ipcMain.on('timer:state-changed', (_, timerState) => {
-  // Broadcast timer state to all windows
+// Auto-switch settings handlers
+ipcMain.handle('window:get-auto-switch-settings', () => {
+  return windowState.autoSwitch;
+});
+
+ipcMain.handle('window:set-auto-switch', (_, enabled) => {
+  windowState.autoSwitch.enabled = enabled;
+  console.log('Auto-switch enabled:', enabled);
+});
+
+ipcMain.handle('window:set-auto-switch-delay', (_, delay) => {
+  windowState.autoSwitch.delay = Math.max(1000, delay); // Minimum 1 second
+  console.log('Auto-switch delay set to:', delay);
+});
+
+ipcMain.handle('window:set-auto-switch-condition', (_, onlyWhenRunning) => {
+  windowState.autoSwitch.onlyWhenRunning = onlyWhenRunning;
+  console.log('Auto-switch condition - only when running:', onlyWhenRunning);
+});
+
+// Mini window always on top handlers
+ipcMain.handle('window:toggle-mini-always-on-top', () => {
+  // Get current state and toggle it
+  const currentState = miniWindow && !miniWindow.isDestroyed() 
+    ? miniWindow.isAlwaysOnTop() 
+    : windowState.miniAlwaysOnTop;
+  
+  const newState = !currentState;
+  windowState.miniAlwaysOnTop = newState;
+  
+  if (miniWindow && !miniWindow.isDestroyed()) {
+    miniWindow.setAlwaysOnTop(newState);
+    console.log('Mini window always on top toggled to:', newState);
+  } else {
+    console.log('Mini window always on top state stored for future use:', newState);
+  }
+  
+  return newState;
+});
+
+ipcMain.handle('window:get-mini-always-on-top-state', () => {
+  // If mini window exists, get the actual state from the window
+  if (miniWindow && !miniWindow.isDestroyed()) {
+    const actualState = miniWindow.isAlwaysOnTop();
+    // Sync our stored state with actual window state
+    windowState.miniAlwaysOnTop = actualState;
+    console.log('Mini window always on top state (actual):', actualState);
+    return actualState;
+  }
+  console.log('Mini window always on top state (stored):', windowState.miniAlwaysOnTop);
+  return windowState.miniAlwaysOnTop;
+});
+
+// Timer utility functions
+const broadcastTimerState = () => {
   if (mainWindow) {
-    mainWindow.webContents.send('timer:state-sync', timerState);
+    mainWindow.webContents.send('timer:state-sync', currentTimerState);
   }
   if (miniWindow) {
-    miniWindow.webContents.send('timer:state-sync', timerState);
+    miniWindow.webContents.send('timer:state-sync', currentTimerState);
   }
   
   // Update tray tooltip with timer info
-  if (tray && timerState.status === 'running' && timerState.activeMs) {
-    const minutes = Math.floor(timerState.activeMs / 60000);
-    const seconds = Math.floor((timerState.activeMs % 60000) / 1000);
-    const timeStr = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-    tray.setToolTip(`Tshifhinga - ${timeStr} - ${timerState.task?.client || 'No task'}`);
-  } else {
-    tray.setToolTip('Tshifhinga Time Tracker');
+  if (tray && !tray.isDestroyed()) {
+    try {
+      if (currentTimerState.status === 'running' && currentTimerState.activeMs) {
+        const minutes = Math.floor(currentTimerState.activeMs / 60000);
+        const seconds = Math.floor((currentTimerState.activeMs % 60000) / 1000);
+        const timeStr = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        tray.setToolTip(`Tshifhinga - ${timeStr} - ${currentTimerState.task?.client || 'No task'}`);
+      } else {
+        tray.setToolTip('Tshifhinga Time Tracker');
+      }
+    } catch (error) {
+      console.error('Error updating tray tooltip:', error);
+    }
   }
+};
+
+const startTimerInterval = () => {
+  if (timerInterval) clearInterval(timerInterval);
+  timerInterval = setInterval(() => {
+    if (currentTimerState.status === 'running' && currentTimerState.startTs) {
+      const now = Date.now();
+      const elapsed = now - currentTimerState.startTs;
+      currentTimerState.activeMs += 1000; // Add 1 second
+      broadcastTimerState();
+    }
+  }, 1000);
+};
+
+const stopTimerInterval = () => {
+  if (timerInterval) {
+    clearInterval(timerInterval);
+    timerInterval = null;
+  }
+};
+
+// IPC handlers for timer actions
+ipcMain.on('timer:start', (_, task) => {
+  currentTimerState = {
+    ...currentTimerState,
+    status: 'running',
+    task,
+    startTs: Date.now(),
+  };
+  startTimerInterval();
+  broadcastTimerState();
+});
+
+ipcMain.on('timer:pause', () => {
+  if (currentTimerState.status === 'running') {
+    currentTimerState.status = 'paused';
+    stopTimerInterval();
+    broadcastTimerState();
+  }
+});
+
+ipcMain.on('timer:resume', () => {
+  if (currentTimerState.status === 'paused') {
+    currentTimerState = {
+      ...currentTimerState,
+      status: 'running',
+      startTs: Date.now(),
+    };
+    startTimerInterval();
+    broadcastTimerState();
+  }
+});
+
+ipcMain.on('timer:stop', async (_, notes) => {
+  if (currentTimerState.status !== 'stopped' && currentTimerState.task) {
+    // Save session to database
+    const session = {
+      id: `session-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`,
+      client: currentTimerState.task.client,
+      project: currentTimerState.task.project,
+      task: currentTimerState.task.task,
+      start: currentTimerState.startTs || Date.now(),
+      end: Date.now(),
+      activeMs: currentTimerState.activeMs,
+      pausedMs: currentTimerState.pausedMs || 0,
+      notes: notes || null,
+      createdAt: Date.now(),
+      isBillable: true,
+    };
+
+    try {
+      await dbService.insertSession(session);
+      console.log('Session saved to database');
+      
+      // Notify renderer to refresh sessions
+      if (mainWindow) {
+        mainWindow.webContents.send('timer-action-refresh-sessions');
+      }
+      if (miniWindow) {
+        miniWindow.webContents.send('timer-action-refresh-sessions');
+      }
+    } catch (error) {
+      console.error('Error saving session:', error);
+    }
+  }
+
+  currentTimerState = {
+    status: 'stopped',
+    activeMs: 0,
+    pausedMs: 0,
+    startTs: null,
+    task: currentTimerState.task, // Keep task selected
+  };
+  stopTimerInterval();
+  broadcastTimerState();
+});
+
+ipcMain.on('timer:set-task', (_, task) => {
+  currentTimerState.task = task;
+  broadcastTimerState();
+});
+
+ipcMain.handle('timer:adjust-time', (_, adjustment) => {
+  currentTimerState.activeMs = Math.max(0, currentTimerState.activeMs + adjustment);
+  broadcastTimerState();
+});
+
+// IPC handlers for timer state sync
+ipcMain.handle('timer:get-state', () => {
+  return currentTimerState;
+});
+
+ipcMain.on('timer:state-changed', (_, timerState) => {
+  currentTimerState = { ...currentTimerState, ...timerState };
+  broadcastTimerState();
 });
 
 // IPC handlers for database operations

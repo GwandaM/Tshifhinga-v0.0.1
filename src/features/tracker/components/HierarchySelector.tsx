@@ -47,6 +47,11 @@ async function loadHierarchyData(): Promise<ClientData[]> {
     if (isElectron()) {
       // Load from database
       const hierarchy = await electronDB.getHierarchy();
+      console.log('Database hierarchy result:', hierarchy);
+      if (!hierarchy || hierarchy.length === 0) {
+        console.log('Database returned empty, using initial sample');
+        return INITIAL_SAMPLE;
+      }
       return hierarchy;
     } else {
       // Fallback to localStorage for web
@@ -127,12 +132,14 @@ export const HierarchySelector: React.FC<{
         }
         
         const data = await loadHierarchyData();
+        console.log('Loaded hierarchy data:', data);
         setClientsData(data);
       } catch (error) {
         console.error('Failed to load hierarchy data:', error);
         // Always provide fallback data to prevent crashes
         setClientsData(INITIAL_SAMPLE);
       } finally {
+        console.log('Setting loading to false');
         setLoading(false);
       }
     };

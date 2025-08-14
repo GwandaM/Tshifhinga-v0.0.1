@@ -2,7 +2,7 @@ import React, { useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { useTimer } from "../TimerContext";
+import { useTimer, TaskRef } from "../TimerContext";
 
 function msToHMS(ms: number) {
   const totalSeconds = Math.floor(ms / 1000);
@@ -14,6 +14,11 @@ function msToHMS(ms: number) {
   const ss = seconds.toString().padStart(2, "0");
   return `${hh}:${mm}:${ss}`;
 }
+
+const getTaskPath = (task: TaskRef | undefined): string => {
+  if (!task) return 'No task selected';
+  return `${task.client} > ${task.project} > ${task.task}`;
+};
 
 export const TimerDisplay: React.FC<{ className?: string }> = ({ className }) => {
   const { status, activeMs, pause, resume, stop, start, task } = useTimer();
@@ -34,11 +39,14 @@ export const TimerDisplay: React.FC<{ className?: string }> = ({ className }) =>
     <div ref={wrapRef} onMouseMove={onMove} className={cn("hero-surface p-6 sm:p-8", className)}>
       <div className="aurora" aria-hidden="true" />
       <div className="relative z-10 flex flex-col items-center gap-4">
+        <div className="text-sm text-center text-muted-foreground truncate" title={getTaskPath(task)}>
+          {getTaskPath(task)}
+        </div>
         <Badge className="bg-secondary text-secondary-foreground" variant="secondary">
-          {status.toUpperCase()}
+          {status?.toUpperCase() || 'STOPPED'}
         </Badge>
         <div className="text-5xl sm:text-6xl font-semibold tracking-tight">
-          {msToHMS(activeMs)}
+          {msToHMS(activeMs || 0)}
         </div>
         <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
           {status === "running" && (

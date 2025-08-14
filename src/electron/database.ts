@@ -20,6 +20,9 @@ interface SessionRecord {
 class DatabaseService {
   private db: any | null = null;
   private dbPath: string;
+  private isClosing: boolean = false;
+  private isInitialized: boolean = false;
+  private initializationPromise: Promise<void> | null = null;
 
   constructor() {
     try {
@@ -46,43 +49,104 @@ class DatabaseService {
       
       this.dbPath = pathJoin(dbDir, 'sessions.db');
       console.log('Database path:', this.dbPath);
-      this.init();
+      // Don't auto-initialize, let it be called explicitly
     } catch (error) {
       console.error('Error in database constructor:', error);
       throw error;
     }
   }
 
-  private init(): void {
-    this.db = new sqlite3.Database(this.dbPath, sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE, (err: any) => {
-      if (err) {
-        console.error('Error opening database:', err);
-        // Try to fix permissions and retry once
-        try {
-          if (existsSync(this.dbPath)) {
-            chmodSync(this.dbPath, 0o666);
+  async init(): Promise<void> {
+    // If already initialized or initializing, return the existing promise
+    if (this.isInitialized) {
+      return Promise.resolve();
+    }
+    
+    if (this.initializationPromise) {
+      return this.initializationPromise;
+    }
+
+    this.initializationPromise = this.initializeDatabaseConnection();
+
+    return this.initializationPromise;
+  }
+
+  private async initializeDatabaseConnection(): Promise<void> {
+    if (this.isClosing) {
+      throw new Error('Database is closing');
+    }
+
+    return new Promise((resolve, reject) => {
+      const connectWithRetry = (isRetry: boolean = false) => {
+        const db = new sqlite3.Database(this.dbPath, sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE, async (err: any) => {
+          if (err) {
+            console.error(`Error ${isRetry ? 'retrying' : 'opening'} database:`, err);
+            
+            if (!isRetry) {
+              // Try to fix permissions and retry once
+              try {
+                if (existsSync(this.dbPath)) {
+                  chmodSync(this.dbPath, 0o666);
+                }
+                console.log('Attempting to retry database connection with fixed permissions...');
+                connectWithRetry(true);
+                return;
+              } catch (retryErr) {
+                console.error('Failed to fix database permissions:', retryErr);
+                this.cleanup();
+                reject(err); // Reject with original error
+                return;
+              }
+            } else {
+              // Second attempt failed
+              this.cleanup();
+              reject(err);
+              return;
+            }
           }
-          this.db = new sqlite3.Database(this.dbPath, sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE);
-          console.log('Connected to SQLite database at:', this.dbPath, '(after permission fix)');
-          this.createTables();
-        } catch (retryErr) {
-          console.error('Failed to fix database permissions:', retryErr);
-        }
-      } else {
-        console.log('Connected to SQLite database at:', this.dbPath);
-        // Ensure file has proper permissions
-        try {
-          chmodSync(this.dbPath, 0o666);
-        } catch (chmodErr) {
-          console.warn('Could not set database file permissions:', chmodErr);
-        }
-        this.createTables();
-      }
+
+          // Connection successful
+          this.db = db;
+          console.log(`Connected to SQLite database at: ${this.dbPath}${isRetry ? ' (after permission fix)' : ''}`);
+          
+          // Ensure file has proper permissions
+          try {
+            chmodSync(this.dbPath, 0o666);
+          } catch (chmodErr) {
+            console.warn('Could not set database file permissions:', chmodErr);
+          }
+          
+          try {
+            await this.createTables();
+            this.isInitialized = true;
+            resolve();
+          } catch (createErr) {
+            console.error('Error creating tables:', createErr);
+            this.cleanup();
+            reject(createErr);
+          }
+        });
+      };
+
+      connectWithRetry(false);
     });
   }
 
-  private createTables(): void {
-    if (!this.db) return;
+  private cleanup(): void {
+    this.isInitialized = false;
+    this.initializationPromise = null;
+    if (this.db) {
+      this.db.close();
+      this.db = null;
+    }
+  }
+
+  private createTables(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (!this.db) {
+        reject(new Error('Database not initialized'));
+        return;
+      }
 
     const createSessionsTable = `
       CREATE TABLE IF NOT EXISTS sessions (
@@ -134,44 +198,84 @@ class DatabaseService {
       )
     `;
 
-    // Create all tables
-    this.db.serialize(() => {
-      this.db.run(createSessionsTable, (err) => {
-        if (err) {
-          console.error('Error creating sessions table:', err);
-        } else {
-          console.log('Sessions table ready');
-          this.addBillableColumnIfMissing();
-        }
-      });
+      let completedTables = 0;
+      const totalTables = 4;
+      let hasError = false;
 
-      this.db.run(createClientsTable, (err) => {
-        if (err) {
-          console.error('Error creating clients table:', err);
-        } else {
-          console.log('Clients table ready');
+      const checkCompletion = () => {
+        completedTables++;
+        if (completedTables === totalTables && !hasError) {
+          this.createIndexes();
+          this.seedInitialData();
+          resolve();
         }
-      });
+      };
 
-      this.db.run(createProjectsTable, (err) => {
-        if (err) {
-          console.error('Error creating projects table:', err);
-        } else {
-          console.log('Projects table ready');
+      const handleError = (err: Error) => {
+        if (!hasError) {
+          hasError = true;
+          reject(err);
         }
-      });
+      };
 
-      this.db.run(createTasksTable, (err) => {
-        if (err) {
-          console.error('Error creating tasks table:', err);
-        } else {
-          console.log('Tasks table ready');
-        }
-      });
+      // Create all tables
+      this.db.serialize(() => {
+        this.db.run(createSessionsTable, (err: any) => {
+          if (err) {
+            console.error('Error creating sessions table:', err);
+            handleError(err);
+          } else {
+            console.log('Sessions table ready');
+            this.addBillableColumnIfMissing();
+            checkCompletion();
+          }
+        });
 
-      this.createIndexes();
-      this.seedInitialData();
+        this.db.run(createClientsTable, (err: any) => {
+          if (err) {
+            console.error('Error creating clients table:', err);
+            handleError(err);
+          } else {
+            console.log('Clients table ready');
+            checkCompletion();
+          }
+        });
+
+        this.db.run(createProjectsTable, (err: any) => {
+          if (err) {
+            console.error('Error creating projects table:', err);
+            handleError(err);
+          } else {
+            console.log('Projects table ready');
+            checkCompletion();
+          }
+        });
+
+        this.db.run(createTasksTable, (err: any) => {
+          if (err) {
+            console.error('Error creating tasks table:', err);
+            handleError(err);
+          } else {
+            console.log('Tasks table ready');
+            checkCompletion();
+          }
+        });
+      });
     });
+  }
+
+  private async ensureReady(): Promise<void> {
+    if (this.isClosing) {
+      throw new Error('Database is closed or closing');
+    }
+    
+    if (!this.isInitialized) {
+      await this.init();
+    }
+    
+    if (!this.db) {
+      throw new Error('Database connection not available');
+    }
   }
 
   private addBillableColumnIfMissing(): void {
@@ -286,11 +390,13 @@ class DatabaseService {
   }
 
   async getAllSessions(): Promise<SessionRecord[]> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
     return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error('Database not initialized'));
-        return;
-      }
 
       const sql = `
         SELECT 
@@ -327,11 +433,14 @@ class DatabaseService {
   }
 
   async insertSession(session: SessionRecord): Promise<void> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
     return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error('Database not initialized'));
-        return;
-      }
+      console.log('Inserting session:', session);
 
       const sql = `
         INSERT INTO sessions (
@@ -352,10 +461,12 @@ class DatabaseService {
         session.notes || null,
         session.createdAt,
         session.isBillable !== false ? 1 : 0,
-      ], function(err) {
+      ], function(err: any) {
         if (err) {
+          console.error('Error inserting session:', err);
           reject(err);
         } else {
+          console.log('Session inserted successfully');
           resolve();
         }
       });
@@ -363,11 +474,13 @@ class DatabaseService {
   }
 
   async updateSession(id: string, updates: Partial<Omit<SessionRecord, 'id' | 'createdAt'>>): Promise<void> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
     return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error('Database not initialized'));
-        return;
-      }
 
       const setParts: string[] = [];
       const values: any[] = [];
@@ -699,11 +812,13 @@ class DatabaseService {
   }
 
   async getHierarchy(): Promise<any[]> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
     return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error('Database not initialized'));
-        return;
-      }
 
       const sql = `
         SELECT 
@@ -761,14 +876,19 @@ class DatabaseService {
   }
 
   async close(): Promise<void> {
+    this.isClosing = true;
+    this.isInitialized = false;
+    this.initializationPromise = null;
+
     return new Promise((resolve) => {
       if (this.db) {
-        this.db.close((err) => {
+        this.db.close((err: any) => {
           if (err) {
             console.error('Error closing database:', err);
           } else {
             console.log('Database connection closed');
           }
+          this.db = null;
           resolve();
         });
       } else {
