@@ -57,7 +57,12 @@ const SessionTimelineItem: React.FC<{ session: SessionRecord; isFirst: boolean; 
   const startTime = formatTime(session.start);
   const endTime = session.end ? formatTime(session.end) : "ongoing";
   const duration = formatDuration(session.activeMs);
-  const clientColor = getClientColor(session.task.client);
+  
+  // Safely extract task information
+  const client = session.task?.client || session.client || 'Unknown Client';
+  const project = session.task?.project || session.project || 'Unknown Project';
+  const task = session.task?.task || 'Unknown Task';
+  const clientColor = getClientColor(client);
 
   return (
     <div className="relative">
@@ -77,7 +82,7 @@ const SessionTimelineItem: React.FC<{ session: SessionRecord; isFirst: boolean; 
               <div className="flex items-center gap-2">
                 <Badge variant="outline" className={cn("text-xs", clientColor)}>
                   <User className="w-3 h-3 mr-1" />
-                  {session.task.client}
+                  {client}
                 </Badge>
                 <span className="text-sm text-muted-foreground">•</span>
                 <span className="text-sm font-medium">{duration}</span>
@@ -91,12 +96,12 @@ const SessionTimelineItem: React.FC<{ session: SessionRecord; isFirst: boolean; 
             <div className="space-y-2">
               <div className="flex items-center gap-1.5">
                 <Briefcase className="w-3.5 h-3.5 text-muted-foreground" />
-                <span className="font-medium text-sm">{session.task.project}</span>
+                <span className="font-medium text-sm">{project}</span>
               </div>
               
               <div className="flex items-center gap-1.5">
                 <CheckSquare className="w-3.5 h-3.5 text-muted-foreground" />
-                <span className="text-sm">{session.task.task}</span>
+                <span className="text-sm">{task}</span>
               </div>
               
               {session.notes && (

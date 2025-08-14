@@ -42,9 +42,12 @@ export const MiniWindow: React.FC = () => {
 
   const recentTasks = useMemo(() => {
     const uniqueTasks = sessions.reduce((acc, session) => {
-      const taskKey = `${session.task.client}-${session.task.project}-${session.task.task}`;
-      if (!acc.find((t) => `${t.client}-${t.project}-${t.task}` === taskKey)) {
-        acc.push(session.task);
+      // Safely handle task data
+      if (session.task && session.task.client && session.task.project && session.task.task) {
+        const taskKey = `${session.task.client}-${session.task.project}-${session.task.task}`;
+        if (!acc.find((t) => `${t.client}-${t.project}-${t.task}` === taskKey)) {
+          acc.push(session.task);
+        }
       }
       return acc;
     }, [] as TaskRef[]);

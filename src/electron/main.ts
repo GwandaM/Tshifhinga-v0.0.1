@@ -57,8 +57,8 @@ const createMainWindow = (): void => {
 
   // Load the app
   const startUrl = isDev 
-    ? 'http://localhost:8080?mode=full' 
-    : `file://${pathJoin(__dirname, '../dist/index.html')}?mode=full`;
+    ? 'http://localhost:8080' 
+    : `file://${pathJoin(__dirname, '../dist/index.html')}`;
   
   mainWindow.loadURL(startUrl);
 

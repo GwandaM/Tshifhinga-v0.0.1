@@ -32,18 +32,15 @@ const App = () => {
     return () => document.removeEventListener('fullscreenchange', handleFullScreenChange);
   }, []);
 
-  // Detect window mode from URL params or electron API
+  // Detect window mode from URL params
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const mode = urlParams.get('mode') as 'full' | 'mini' | null;
     
     if (mode === 'mini') {
       setWindowMode('mini');
-    } else if ((window as any).electronAPI?.window) {
-      // Get mode from electron if available
-      (window as any).electronAPI.window.getMode().then((mode: string) => {
-        setWindowMode(mode as 'full' | 'mini' | 'tray');
-      });
+    } else {
+      setWindowMode('full');
     }
   }, []);
 
@@ -52,6 +49,7 @@ const App = () => {
       (window as any).electronAPI.window.switchToMini();
     }
   };
+
 
   // If in mini mode, render mini window
   if (windowMode === 'mini') {

@@ -165,7 +165,7 @@ export const RecentSessionsTable: React.FC<RecentSessionsTableProps> = ({
               {sortedSessions.map((session) => {
                 const client = session.task?.client || session.client || 'Unknown Client';
                 const project = session.task?.project || session.project || 'Unknown Project';
-                const task = session.task?.task || session.task || 'Unknown Task';
+                const task = session.task?.task || 'Unknown Task';
                 const clientColor = getClientColor(client);
                 
                 return (
