@@ -15,6 +15,25 @@ interface SessionRecord {
   notes?: string;
   createdAt: number;
   isBillable?: boolean;
+  userId?: number;
+}
+
+interface UserRecord {
+  id: number;
+  username: string;
+  email: string;
+  passwordHash: string;
+  role: 'admin' | 'user';
+  isActive: boolean;
+  createdAt: number;
+}
+
+interface ProjectPermissionRecord {
+  id: number;
+  userId: number;
+  projectId: number;
+  canTrackTime: boolean;
+  createdAt: number;
 }
 
 class DatabaseService {
@@ -161,7 +180,9 @@ class DatabaseService {
         notes TEXT,
         created_at INTEGER NOT NULL,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        is_billable BOOLEAN DEFAULT 1
+        is_billable BOOLEAN DEFAULT 1,
+        user_id INTEGER,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
       )
     `;
 
@@ -198,8 +219,34 @@ class DatabaseService {
       )
     `;
 
+    const createUsersTable = `
+      CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL UNIQUE,
+        email TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'user',
+        is_active BOOLEAN DEFAULT 1,
+        created_at INTEGER NOT NULL,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `;
+
+    const createProjectPermissionsTable = `
+      CREATE TABLE IF NOT EXISTS user_project_permissions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        project_id INTEGER NOT NULL,
+        can_track_time BOOLEAN DEFAULT 1,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+        UNIQUE(user_id, project_id)
+      )
+    `;
+
       let completedTables = 0;
-      const totalTables = 4;
+      const totalTables = 6;
       let hasError = false;
 
       const checkCompletion = () => {
@@ -260,6 +307,27 @@ class DatabaseService {
             checkCompletion();
           }
         });
+
+        this.db.run(createUsersTable, (err: any) => {
+          if (err) {
+            console.error('Error creating users table:', err);
+            handleError(err);
+          } else {
+            console.log('Users table ready');
+            this.addUserIdColumnIfMissing();
+            checkCompletion();
+          }
+        });
+
+        this.db.run(createProjectPermissionsTable, (err: any) => {
+          if (err) {
+            console.error('Error creating project permissions table:', err);
+            handleError(err);
+          } else {
+            console.log('Project permissions table ready');
+            checkCompletion();
+          }
+        });
       });
     });
   }
@@ -305,6 +373,33 @@ class DatabaseService {
     });
   }
 
+  private addUserIdColumnIfMissing(): void {
+    if (!this.db) return;
+
+    // Check if user_id column exists
+    this.db.all("PRAGMA table_info(sessions)", (err, columns: any[]) => {
+      if (err) {
+        console.error('Error checking table structure for user_id:', err);
+        return;
+      }
+
+      const hasUserIdColumn = columns.some(col => col.name === 'user_id');
+      
+      if (!hasUserIdColumn) {
+        console.log('Adding user_id column to existing sessions table...');
+        this.db.run("ALTER TABLE sessions ADD COLUMN user_id INTEGER REFERENCES users(id)", (alterErr) => {
+          if (alterErr) {
+            console.error('Error adding user_id column:', alterErr);
+          } else {
+            console.log('Successfully added user_id column');
+          }
+        });
+      } else {
+        console.log('user_id column already exists');
+      }
+    });
+  }
+
   private createIndexes(): void {
     if (!this.db) return;
 
@@ -313,8 +408,11 @@ class DatabaseService {
       'CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project)',
       'CREATE INDEX IF NOT EXISTS idx_sessions_start_time ON sessions(start_time)',
       'CREATE INDEX IF NOT EXISTS idx_sessions_created_at ON sessions(created_at)',
+      'CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)',
       'CREATE INDEX IF NOT EXISTS idx_projects_client_id ON projects(client_id)',
       'CREATE INDEX IF NOT EXISTS idx_tasks_project_id ON tasks(project_id)',
+      'CREATE INDEX IF NOT EXISTS idx_user_project_permissions_user_id ON user_project_permissions(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_user_project_permissions_project_id ON user_project_permissions(project_id)',
     ];
 
     indexes.forEach((indexSql) => {
@@ -404,7 +502,7 @@ class DatabaseService {
           start_time as start, end_time as end,
           active_ms as activeMs, paused_ms as pausedMs,
           notes, created_at as createdAt,
-          is_billable as isBillable
+          is_billable as isBillable, user_id as userId
         FROM sessions 
         ORDER BY created_at DESC
       `;
@@ -425,6 +523,56 @@ class DatabaseService {
             notes: row.notes,
             createdAt: row.createdAt,
             isBillable: row.isBillable !== 0,
+            userId: row.userId,
+          }));
+          resolve(sessions);
+        }
+      });
+    });
+  }
+
+  async getUserSessions(userId: number): Promise<SessionRecord[]> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      const sql = `
+        SELECT 
+          id, client, project, task,
+          start_time as start, end_time as end,
+          active_ms as activeMs, paused_ms as pausedMs,
+          notes, created_at as createdAt,
+          is_billable as isBillable, user_id as userId
+        FROM sessions 
+        WHERE user_id = ? AND user_id IS NOT NULL
+        ORDER BY created_at DESC
+      `;
+
+      console.log('Executing getUserSessions query for userId:', userId);
+      console.log('SQL:', sql);
+      
+      this.db.all(sql, [userId], (err, rows: any[]) => {
+        if (err) {
+          console.error('Error executing getUserSessions query:', err);
+          reject(err);
+        } else {
+          console.log(`Found ${rows.length} sessions for user ${userId}:`, rows);
+          const sessions: SessionRecord[] = rows.map(row => ({
+            id: row.id,
+            client: row.client,
+            project: row.project,
+            task: row.task,
+            start: row.start,
+            end: row.end,
+            activeMs: row.activeMs,
+            pausedMs: row.pausedMs,
+            notes: row.notes,
+            createdAt: row.createdAt,
+            isBillable: row.isBillable !== 0,
+            userId: row.userId,
           }));
           resolve(sessions);
         }
@@ -445,8 +593,8 @@ class DatabaseService {
       const sql = `
         INSERT INTO sessions (
           id, client, project, task, start_time, end_time,
-          active_ms, paused_ms, notes, created_at, is_billable
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          active_ms, paused_ms, notes, created_at, is_billable, user_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
 
       this.db.run(sql, [
@@ -461,6 +609,7 @@ class DatabaseService {
         session.notes || null,
         session.createdAt,
         session.isBillable !== false ? 1 : 0,
+        session.userId || null,
       ], function(err: any) {
         if (err) {
           console.error('Error inserting session:', err);
@@ -517,6 +666,10 @@ class DatabaseService {
         setParts.push('is_billable = ?');
         values.push(updates.isBillable ? 1 : 0);
       }
+      if (updates.userId !== undefined) {
+        setParts.push('user_id = ?');
+        values.push(updates.userId);
+      }
 
       if (setParts.length === 0) {
         resolve();
@@ -568,7 +721,7 @@ class DatabaseService {
           start_time as start, end_time as end,
           active_ms as activeMs, paused_ms as pausedMs,
           notes, created_at as createdAt,
-          is_billable as isBillable
+          is_billable as isBillable, user_id as userId
         FROM sessions 
         WHERE start_time >= ? AND start_time <= ?
         ORDER BY start_time DESC
@@ -590,6 +743,7 @@ class DatabaseService {
             notes: row.notes,
             createdAt: row.createdAt,
             isBillable: row.isBillable !== 0,
+            userId: row.userId,
           }));
           resolve(sessions);
         }
@@ -870,6 +1024,178 @@ class DatabaseService {
           }));
 
           resolve(hierarchy);
+        }
+      });
+    });
+  }
+
+  // Auth methods
+  async createUser(username: string, email: string, passwordHash: string, role: 'admin' | 'user' = 'user'): Promise<number> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      const sql = 'INSERT INTO users (username, email, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)';
+      this.db.run(sql, [username, email, passwordHash, role, Date.now()], function(err) {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(this.lastID);
+        }
+      });
+    });
+  }
+
+  async getUserByUsername(username: string): Promise<UserRecord | null> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      const sql = 'SELECT id, username, email, password_hash as passwordHash, role, is_active as isActive, created_at as createdAt FROM users WHERE username = ? AND is_active = 1';
+      this.db.get(sql, [username], (err, row: any) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(row || null);
+        }
+      });
+    });
+  }
+
+  async getUserById(id: number): Promise<UserRecord | null> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      const sql = 'SELECT id, username, email, password_hash as passwordHash, role, is_active as isActive, created_at as createdAt FROM users WHERE id = ? AND is_active = 1';
+      this.db.get(sql, [id], (err, row: any) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(row || null);
+        }
+      });
+    });
+  }
+
+  async getUserProjectPermissions(userId: number): Promise<number[]> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      const sql = 'SELECT project_id FROM user_project_permissions WHERE user_id = ? AND can_track_time = 1';
+      this.db.all(sql, [userId], (err, rows: any[]) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(rows.map(row => row.project_id));
+        }
+      });
+    });
+  }
+
+  async addUserProjectPermission(userId: number, projectId: number): Promise<void> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      const sql = 'INSERT OR REPLACE INTO user_project_permissions (user_id, project_id, can_track_time, created_at) VALUES (?, ?, 1, ?)';
+      this.db.run(sql, [userId, projectId, Date.now()], function(err) {
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
+      });
+    });
+  }
+
+  async removeUserProjectPermission(userId: number, projectId: number): Promise<void> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      const sql = 'DELETE FROM user_project_permissions WHERE user_id = ? AND project_id = ?';
+      this.db.run(sql, [userId, projectId], function(err) {
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
+      });
+    });
+  }
+
+  async getAllUsers(): Promise<Omit<UserRecord, 'passwordHash'>[]> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      const sql = 'SELECT id, username, email, role, is_active as isActive, created_at as createdAt FROM users ORDER BY created_at DESC';
+      this.db.all(sql, (err, rows: any[]) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(rows);
+        }
+      });
+    });
+  }
+
+  async updateUserRole(userId: number, role: 'admin' | 'user'): Promise<void> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      const sql = 'UPDATE users SET role = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?';
+      this.db.run(sql, [role, userId], function(err) {
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
+      });
+    });
+  }
+
+  async deactivateUser(userId: number): Promise<void> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      const sql = 'UPDATE users SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?';
+      this.db.run(sql, [userId], function(err) {
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
         }
       });
     });

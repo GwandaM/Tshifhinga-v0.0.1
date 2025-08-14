@@ -9,6 +9,8 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { TimerProvider } from "@/features/tracker/TimerContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ThemeProvider } from "@/components/theme-provider";
+import { AuthProvider } from "@/contexts/AuthContext";
+import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { MiniWindow } from "@/components/MiniWindow";
 import { Button } from "@/components/ui/button";
@@ -16,6 +18,8 @@ import { Minimize2 } from "lucide-react";
 import Index from "./pages/Index";
 import CalendarPage from "./pages/Calendar";
 import Reports from "./pages/Reports";
+import UserManagement from "./pages/admin/UserManagement";
+import ActivityMonitoring from "./pages/admin/ActivityMonitoring";
 
 const queryClient = new QueryClient();
 
@@ -82,10 +86,11 @@ const App = () => {
         disableTransitionOnChange
       >
         <QueryClientProvider client={queryClient}>
-          <TooltipProvider>
-            <Toaster />
-            <Sonner />
-            <TimerProvider>
+          <AuthProvider>
+            <TooltipProvider>
+              <Toaster />
+              <Sonner />
+              <TimerProvider>
               <BrowserRouter>
                 <SidebarProvider defaultOpen={false}>
                   {!isFullScreen && (
@@ -112,19 +117,38 @@ const App = () => {
                   <div className="flex min-h-screen w-full">
                     {!isFullScreen && <AppSidebar />}
                     <main className="flex-1">
-                      <Routes>
-                        <Route path="/" element={<Index />} />
-                        <Route path="/calendar" element={<CalendarPage />} />
-                        <Route path="/reports" element={<Reports />} />
-                        {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-                        <Route path="*" element={<Index />} />
-                      </Routes>
+                      <ProtectedRoute>
+                        <Routes>
+                          <Route path="/" element={<Index />} />
+                          <Route path="/calendar" element={<CalendarPage />} />
+                          <Route path="/reports" element={<Reports />} />
+                          <Route 
+                            path="/admin/users" 
+                            element={
+                              <ProtectedRoute requiredPermission="manage_users">
+                                <UserManagement />
+                              </ProtectedRoute>
+                            } 
+                          />
+                          <Route 
+                            path="/admin/activity" 
+                            element={
+                              <ProtectedRoute requiredPermission="view_all_sessions">
+                                <ActivityMonitoring />
+                              </ProtectedRoute>
+                            } 
+                          />
+                          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+                          <Route path="*" element={<Index />} />
+                        </Routes>
+                      </ProtectedRoute>
                     </main>
                   </div>
                 </SidebarProvider>
               </BrowserRouter>
-            </TimerProvider>
-          </TooltipProvider>
+              </TimerProvider>
+            </TooltipProvider>
+          </AuthProvider>
         </QueryClientProvider>
       </ThemeProvider>
     </ErrorBoundary>

@@ -25,6 +25,22 @@ export default defineConfig(({ mode }) => ({
           options.startup();
         },
       },
+      {
+        entry: "src/electron/database.ts",
+        vite: {
+          build: {
+            outDir: "dist-electron"
+          }
+        }
+      },
+      {
+        entry: "src/electron/auth-service.ts",
+        vite: {
+          build: {
+            outDir: "dist-electron"
+          }
+        }
+      },
     ]),
     renderer(),
   ],

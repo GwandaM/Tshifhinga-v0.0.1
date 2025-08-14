@@ -34,6 +34,13 @@ class ElectronDatabaseService {
     return await window.electronAPI.database.getAllSessions();
   }
 
+  async getUserSessions(userId: number): Promise<SessionRecord[]> {
+    if (!this.isElectron()) {
+      throw new Error('Not running in Electron environment');
+    }
+    return await window.electronAPI.database.getUserSessions(userId);
+  }
+
   async insertSession(session: SessionRecord): Promise<void> {
     if (!this.isElectron()) {
       throw new Error('Not running in Electron environment');

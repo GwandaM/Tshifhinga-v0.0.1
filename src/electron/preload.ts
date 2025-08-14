@@ -5,6 +5,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 const electronAPI = {
   database: {
     getAllSessions: () => ipcRenderer.invoke('db:getAllSessions'),
+    getUserSessions: (userId) => ipcRenderer.invoke('db:getUserSessions', userId),
     insertSession: (session) => ipcRenderer.invoke('db:insertSession', session),
     updateSession: (id, updates) => ipcRenderer.invoke('db:updateSession', id, updates),
     deleteSession: (id) => ipcRenderer.invoke('db:deleteSession', id),
@@ -63,6 +64,19 @@ const electronAPI = {
       ipcRenderer.removeAllListeners('screen-lock');
       ipcRenderer.removeAllListeners('screen-unlock');
     }
+  },
+  auth: {
+    login: (username, password) => ipcRenderer.invoke('auth:login', username, password),
+    register: (username, email, password, role) => ipcRenderer.invoke('auth:register', username, email, password, role),
+    verifyToken: (token) => ipcRenderer.invoke('auth:verify-token', token),
+    getCurrentUser: (token) => ipcRenderer.invoke('auth:get-current-user', token),
+    getUserProjectPermissions: (userId) => ipcRenderer.invoke('auth:get-user-project-permissions', userId),
+    hasProjectPermission: (userId, projectId) => ipcRenderer.invoke('auth:has-project-permission', userId, projectId),
+    addUserToProject: (userId, projectId) => ipcRenderer.invoke('auth:add-user-to-project', userId, projectId),
+    removeUserFromProject: (userId, projectId) => ipcRenderer.invoke('auth:remove-user-from-project', userId, projectId),
+    getAllUsers: () => ipcRenderer.invoke('auth:get-all-users'),
+    updateUserRole: (userId, role) => ipcRenderer.invoke('auth:update-user-role', userId, role),
+    deactivateUser: (userId) => ipcRenderer.invoke('auth:deactivate-user', userId),
   },
 };
 

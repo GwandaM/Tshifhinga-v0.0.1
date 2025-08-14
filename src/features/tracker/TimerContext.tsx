@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { electronDB, type SessionRecord as DBSessionRecord } from "@/lib/electron-database";
+import { useAuth } from "@/contexts/AuthContext";
 
 export type TimerStatus = "stopped" | "running" | "paused" | "completed";
 
@@ -54,6 +55,7 @@ interface TimerContextValue extends TimerState {
 const TimerContext = createContext<TimerContextValue | undefined>(undefined);
 
 export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user, hasPermission, token } = useAuth();
   const [timerState, setTimerState] = useState<TimerState>({ status: "stopped", activeMs: 0, pausedMs: 0 });
   const [notes, setNotes] = useState("");
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
@@ -72,11 +74,20 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const lastActivityRef = React.useRef<number>(Date.now());
 
   const refreshSessions = useCallback(async () => {
-    if ((window as any).electronAPI) {
-      const dbSessions = await electronDB.getAllSessions();
+    if ((window as any).electronAPI && user) {
+      let dbSessions;
+      // Admin can see all sessions, regular users only see their own
+      if (hasPermission('view_all_sessions')) {
+        console.log('Admin user - fetching all sessions');
+        dbSessions = await electronDB.getAllSessions();
+      } else {
+        console.log('Regular user - fetching user sessions for user ID:', user.id);
+        dbSessions = await electronDB.getUserSessions(user.id);
+      }
+      console.log('Retrieved sessions:', dbSessions.length, dbSessions);
       setSessions(dbSessions.map(dbRecordToSessionRecord));
     }
-  }, []);
+  }, [user, hasPermission]);
 
   useEffect(() => {
     const electronAvailable = !!(window as any).electronAPI;
@@ -197,10 +208,13 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, []);
 
   const stop = useCallback(async (n?: string) => {
-    await (window as any).electronAPI?.timer.stop(n ?? notes);
+    await (window as any).electronAPI?.timer.stop({ 
+      notes: n ?? notes, 
+      token 
+    });
     setNotes("");
     refreshSessions();
-  }, [notes, refreshSessions]);
+  }, [notes, refreshSessions, token]);
 
   const setTask = useCallback((t?: TaskRef) => {
     (window as any).electronAPI?.timer.setTask(t);

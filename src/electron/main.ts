@@ -2,6 +2,7 @@ const { app: electronApp, BrowserWindow, ipcMain, dialog, powerMonitor, Tray, Me
 const { join: pathJoin } = require('path');
 const { writeFile } = require('fs').promises;
 const { DatabaseService } = require('./database');
+const { AuthService } = require('./auth-service');
 const isDev = require('electron-is-dev');
 
 // Set app name early to ensure proper userData path
@@ -9,6 +10,7 @@ electronApp.setName('tshifhinga-time-tracker');
 
 // Keep a global reference of the database service and windows
 let dbService: any;
+let authService: any;
 let mainWindow: any | null = null;
 let miniWindow: any | null = null;
 let tray: any | null = null;
@@ -318,6 +320,10 @@ electronApp.whenReady().then(async () => {
   dbService = new DatabaseService();
   await dbService.init();
   
+  // Initialize auth service
+  authService = new AuthService();
+  await authService.init();
+  
   // Create main window initially
   createMainWindow();
   
@@ -382,7 +388,10 @@ electronApp.on('window-all-closed', () => {
 });
 
 electronApp.on('before-quit', async () => {
-  // Clean up database connection
+  // Clean up database and auth service connections
+  if (authService) {
+    await authService.close();
+  }
   if (dbService) {
     await dbService.close();
   }
@@ -546,8 +555,23 @@ ipcMain.on('timer:resume', () => {
   }
 });
 
-ipcMain.on('timer:stop', async (_, notes) => {
+ipcMain.on('timer:stop', async (_, data) => {
   if (currentTimerState.status !== 'stopped' && currentTimerState.task) {
+    const { notes, token } = data || {};
+    
+    // Get user ID from token
+    let userId = null;
+    if (token) {
+      try {
+        const user = await authService.verifyToken(token);
+        if (user) {
+          userId = user.id;
+        }
+      } catch (error) {
+        console.error('Error verifying token:', error);
+      }
+    }
+
     // Save session to database
     const session = {
       id: `session-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`,
@@ -561,6 +585,7 @@ ipcMain.on('timer:stop', async (_, notes) => {
       notes: notes || null,
       createdAt: Date.now(),
       isBillable: true,
+      userId: userId,
     };
 
     try {
@@ -613,6 +638,10 @@ ipcMain.on('timer:state-changed', (_, timerState) => {
 // IPC handlers for database operations
 ipcMain.handle('db:getAllSessions', async () => {
   return await dbService.getAllSessions();
+});
+
+ipcMain.handle('db:getUserSessions', async (_, userId) => {
+  return await dbService.getUserSessions(userId);
 });
 
 ipcMain.handle('db:insertSession', async (_, session) => {
@@ -684,4 +713,49 @@ ipcMain.handle('writeFile', async (_, filePath, content) => {
     console.error('Error writing file:', error);
     return { success: false, error: error.message };
   }
+});
+
+// Auth IPC handlers
+ipcMain.handle('auth:login', async (_, username, password) => {
+  return await authService.login(username, password);
+});
+
+ipcMain.handle('auth:register', async (_, username, email, password, role) => {
+  return await authService.register(username, email, password, role);
+});
+
+ipcMain.handle('auth:verify-token', async (_, token) => {
+  return await authService.verifyToken(token);
+});
+
+ipcMain.handle('auth:get-current-user', async (_, token) => {
+  return await authService.getCurrentUser(token);
+});
+
+ipcMain.handle('auth:get-user-project-permissions', async (_, userId) => {
+  return await authService.getUserProjectPermissions(userId);
+});
+
+ipcMain.handle('auth:has-project-permission', async (_, userId, projectId) => {
+  return await authService.hasProjectPermission(userId, projectId);
+});
+
+ipcMain.handle('auth:add-user-to-project', async (_, userId, projectId) => {
+  return await authService.addUserToProject(userId, projectId);
+});
+
+ipcMain.handle('auth:remove-user-from-project', async (_, userId, projectId) => {
+  return await authService.removeUserFromProject(userId, projectId);
+});
+
+ipcMain.handle('auth:get-all-users', async () => {
+  return await authService.getAllUsers();
+});
+
+ipcMain.handle('auth:update-user-role', async (_, userId, role) => {
+  return await authService.updateUserRole(userId, role);
+});
+
+ipcMain.handle('auth:deactivate-user', async (_, userId) => {
+  return await authService.deactivateUser(userId);
 });
