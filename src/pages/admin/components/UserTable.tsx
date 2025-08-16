@@ -97,6 +97,15 @@ export function UserTable({ users, onEditUser, onUserUpdated }: UserTableProps) 
     return user.username;
   };
 
+  const formatTeamName = (teamName: string) => {
+    if (!teamName) return teamName;
+    return teamName
+      .toLowerCase()
+      .split('_')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  };
+
   const handleToggleUserStatus = async (user: UserData) => {
     if (user.id === currentUser?.id) {
       toast({
@@ -249,9 +258,9 @@ export function UserTable({ users, onEditUser, onUserUpdated }: UserTableProps) 
               <TableHead className="w-[60px]"></TableHead>
               <TableHead>User</TableHead>
               <TableHead>Contact</TableHead>
-              <TableHead>Organization</TableHead>
-              <TableHead>Financial</TableHead>
-              <TableHead>Role & Status</TableHead>
+              <TableHead>Region</TableHead>
+              <TableHead>Team</TableHead>
+              <TableHead>User Level</TableHead>
               <TableHead>Created</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
@@ -261,7 +270,7 @@ export function UserTable({ users, onEditUser, onUserUpdated }: UserTableProps) 
               <TableRow key={user.id}>
                 <TableCell>
                   <Avatar className="h-8 w-8">
-                    <AvatarFallback className="text-xs">
+                    <AvatarFallback className={`text-xs text-white ${user.role === 'admin' ? 'bg-red-500' : 'bg-green-500'}`}>
                       {getInitials(user)}
                     </AvatarFallback>
                   </Avatar>
@@ -277,8 +286,10 @@ export function UserTable({ users, onEditUser, onUserUpdated }: UserTableProps) 
                         </Badge>
                       )}
                     </div>
-                    <div className="text-xs text-muted-foreground">
-                      @{user.username}
+                    <div className="flex items-center space-x-2">
+                      <Badge variant={user.isActive ? 'default' : 'secondary'} className="text-xs">
+                        {user.isActive ? 'Active' : 'Inactive'}
+                      </Badge>
                     </div>
                   </div>
                 </TableCell>
@@ -294,57 +305,40 @@ export function UserTable({ users, onEditUser, onUserUpdated }: UserTableProps) 
                 
                 <TableCell>
                   <div className="space-y-1">
-                    {user.team && (
-                      <div className="flex items-center space-x-1 text-xs text-muted-foreground">
-                        <Building className="h-3 w-3" />
-                        <span>{user.team}</span>
-                      </div>
-                    )}
-                    {user.region && (
-                      <div className="flex items-center space-x-1 text-xs text-muted-foreground">
-                        <MapPin className="h-3 w-3" />
+                    {user.region ? (
+                      <div className="flex items-center space-x-1 text-sm">
+                        <MapPin className="h-3 w-3 text-muted-foreground" />
                         <span>{user.region}</span>
                       </div>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">-</span>
                     )}
-                    {user.jobLevel && (
-                      <div className="flex items-center space-x-1 text-xs text-muted-foreground">
-                        <Briefcase className="h-3 w-3" />
+                  </div>
+                </TableCell>
+                
+                <TableCell>
+                  <div className="space-y-1">
+                    {user.team ? (
+                      <div className="flex items-center space-x-1 text-sm">
+                        <Building className="h-3 w-3 text-muted-foreground" />
+                        <span>{formatTeamName(user.team)}</span>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">-</span>
+                    )}
+                  </div>
+                </TableCell>
+                
+                <TableCell>
+                  <div className="space-y-1">
+                    {user.jobLevel ? (
+                      <div className="flex items-center space-x-1 text-sm">
+                        <Briefcase className="h-3 w-3 text-muted-foreground" />
                         <span>{user.jobLevel}</span>
                       </div>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">-</span>
                     )}
-                  </div>
-                </TableCell>
-                
-                <TableCell>
-                  <div className="space-y-1">
-                    {user.billableRate && (
-                      <div className="flex items-center space-x-1 text-xs">
-                        <DollarSign className="h-3 w-3 text-green-600" />
-                        <span className="font-medium">R{user.billableRate}/hr</span>
-                      </div>
-                    )}
-                    {user.targetUtilization && (
-                      <div className="text-xs text-muted-foreground">
-                        Target: {user.targetUtilization}%
-                      </div>
-                    )}
-                  </div>
-                </TableCell>
-                
-                <TableCell>
-                  <div className="space-y-1">
-                    <Badge 
-                      variant={user.role === 'admin' ? 'destructive' : 'secondary'}
-                      className="capitalize text-xs"
-                    >
-                      {user.role === 'admin' && <Shield className="mr-1 h-3 w-3" />}
-                      {user.role}
-                    </Badge>
-                    <div>
-                      <Badge variant={user.isActive ? 'default' : 'secondary'} className="text-xs">
-                        {user.isActive ? 'Active' : 'Inactive'}
-                      </Badge>
-                    </div>
                   </div>
                 </TableCell>
                 

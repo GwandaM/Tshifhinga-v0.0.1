@@ -151,7 +151,15 @@ class AuthService {
         id: dbUser.id,
         username: dbUser.username,
         email: dbUser.email,
-        role: dbUser.role
+        role: dbUser.role,
+        name: dbUser.name,
+        surname: dbUser.surname,
+        team: dbUser.team,
+        region: dbUser.region,
+        jobLevel: dbUser.jobLevel,
+        billableRate: dbUser.billableRate,
+        discountPercentage: dbUser.discountPercentage,
+        targetUtilization: dbUser.targetUtilization
       };
 
       // Generate JWT token
@@ -182,7 +190,15 @@ class AuthService {
         id: dbUser.id,
         username: dbUser.username,
         email: dbUser.email,
-        role: dbUser.role
+        role: dbUser.role,
+        name: dbUser.name,
+        surname: dbUser.surname,
+        team: dbUser.team,
+        region: dbUser.region,
+        jobLevel: dbUser.jobLevel,
+        billableRate: dbUser.billableRate,
+        discountPercentage: dbUser.discountPercentage,
+        targetUtilization: dbUser.targetUtilization
       };
     } catch (error) {
       console.error('Token verification error:', error);
@@ -246,6 +262,39 @@ class AuthService {
     } catch (error) {
       console.error('Error getting all users:', error);
       return [];
+    }
+  }
+
+  async updateUser(
+    userId: number, 
+    userData: {
+      username?: string;
+      email?: string;
+      role?: 'admin' | 'user' | 'director';
+      name?: string;
+      surname?: string;
+      team?: string;
+      region?: string;
+      jobLevel?: string;
+      billableRate?: number;
+      discountPercentage?: number;
+      targetUtilization?: number;
+    }
+  ): Promise<boolean> {
+    try {
+      // Validate username uniqueness if being updated
+      if (userData.username) {
+        const existingUser = await this.db.getUserByUsername(userData.username);
+        if (existingUser && existingUser.id !== userId) {
+          return false; // Username already exists
+        }
+      }
+
+      const success = await this.db.updateUserEnhanced(userId, userData);
+      return success;
+    } catch (error) {
+      console.error('Error updating user:', error);
+      return false;
     }
   }
 

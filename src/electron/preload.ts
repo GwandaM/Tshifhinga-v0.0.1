@@ -96,6 +96,7 @@ const electronAPI = {
     addUserToProject: (userId, projectId) => ipcRenderer.invoke('auth:add-user-to-project', userId, projectId),
     removeUserFromProject: (userId, projectId) => ipcRenderer.invoke('auth:remove-user-from-project', userId, projectId),
     getAllUsers: () => ipcRenderer.invoke('auth:get-all-users'),
+    updateUser: (userId, userData) => ipcRenderer.invoke('auth:update-user', userId, userData),
     updateUserRole: (userId, role) => ipcRenderer.invoke('auth:update-user-role', userId, role),
     deactivateUser: (userId) => ipcRenderer.invoke('auth:deactivate-user', userId),
   },

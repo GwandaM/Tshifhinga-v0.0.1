@@ -264,34 +264,36 @@ export function EditUserModal({ open, onOpenChange, user, onUserUpdated }: EditU
     setIsLoading(true);
 
     try {
-      // Note: We would need to implement updateUser method in the backend
-      // For now, we can only update the role
-      if (formData.role !== user.role) {
-        const success = await window.electronAPI.auth.updateUserRole(user.id, formData.role);
-        
-        if (!success) {
-          throw new Error('Failed to update user role');
-        }
+      const additionalData = {
+        username: formData.username,
+        email: formData.email,
+        role: formData.role,
+        name: formData.name,
+        surname: formData.surname,
+        team: formData.team,
+        region: formData.region,
+        jobLevel: formData.jobLevel,
+        billableRate: formData.billableRate ? Number(formData.billableRate) : undefined,
+        discountPercentage: Number(formData.discountPercentage),
+        targetUtilization: Number(formData.targetUtilization),
+      };
+
+      const success = await window.electronAPI.auth.updateUser(user.id, additionalData);
+      
+      if (!success) {
+        throw new Error('Failed to update user - username might already exist');
       }
 
-      // TODO: Add methods for updating username and email
-      if (formData.username !== user.username || formData.email !== user.email) {
-        toast({
-          title: "Partial update",
-          description: "Role updated successfully. Username and email updates require backend implementation.",
-        });
-      } else {
-        toast({
-          title: "User updated successfully",
-          description: `${formData.username}'s information has been updated`,
-        });
-      }
+      toast({
+        title: "User updated successfully",
+        description: `${formData.username}'s information has been updated`,
+      });
       
       onUserUpdated();
       onOpenChange(false);
     } catch (error) {
       console.error('Error updating user:', error);
-      setErrors({ general: 'Failed to update user. Please try again.' });
+      setErrors({ general: 'Failed to update user. Username might already exist or another error occurred.' });
     } finally {
       setIsLoading(false);
     }

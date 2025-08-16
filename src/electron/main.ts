@@ -813,6 +813,10 @@ ipcMain.handle('auth:get-all-users', async () => {
   return await authService.getAllUsers();
 });
 
+ipcMain.handle('auth:update-user', async (_, userId, userData) => {
+  return await authService.updateUser(userId, userData);
+});
+
 ipcMain.handle('auth:update-user-role', async (_, userId, role) => {
   return await authService.updateUserRole(userId, role);
 });

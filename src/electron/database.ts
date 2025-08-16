@@ -1291,6 +1291,73 @@ class DatabaseService {
     });
   }
 
+  // Enhanced user update with new fields
+  async updateUserEnhanced(userId: number, userData: {
+    username?: string;
+    email?: string;
+    role?: 'admin' | 'user' | 'director';
+    name?: string;
+    surname?: string;
+    team?: string;
+    region?: string;
+    jobLevel?: string;
+    billableRate?: number;
+    discountPercentage?: number;
+    targetUtilization?: number;
+  }): Promise<boolean> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    // Auto-populate billable rate if job level is provided but rate is not
+    let finalBillableRate = userData.billableRate;
+    if (userData.jobLevel && finalBillableRate === undefined) {
+      finalBillableRate = await this.getBillableRateByJobLevel(userData.jobLevel);
+    }
+
+    return new Promise((resolve, reject) => {
+      const sql = `
+        UPDATE users SET 
+          username = COALESCE(?, username),
+          email = COALESCE(?, email),
+          role = COALESCE(?, role),
+          name = COALESCE(?, name),
+          surname = COALESCE(?, surname),
+          team = COALESCE(?, team),
+          region = COALESCE(?, region),
+          job_level = COALESCE(?, job_level),
+          billable_rate = COALESCE(?, billable_rate),
+          discount_percentage = COALESCE(?, discount_percentage),
+          target_utilization = COALESCE(?, target_utilization)
+        WHERE id = ?
+      `;
+
+      this.db.run(sql, [
+        userData.username || null,
+        userData.email || null,
+        userData.role || null,
+        userData.name || null,
+        userData.surname || null,
+        userData.team || null,
+        userData.region || null,
+        userData.jobLevel || null,
+        finalBillableRate !== undefined ? finalBillableRate : null,
+        userData.discountPercentage !== undefined ? userData.discountPercentage : null,
+        userData.targetUtilization !== undefined ? userData.targetUtilization : null,
+        userId
+      ], function(err: any) {
+        if (err) {
+          console.error('Error updating user in database:', err);
+          reject(err);
+        } else {
+          resolve(this.changes > 0);
+        }
+      });
+    });
+  }
+
   async getUserByUsername(username: string): Promise<UserRecord | null> {
     try {
       await this.ensureReady();
@@ -1318,7 +1385,15 @@ class DatabaseService {
     }
 
     return new Promise((resolve, reject) => {
-      const sql = 'SELECT id, username, email, password_hash as passwordHash, role, is_active as isActive, created_at as createdAt FROM users WHERE id = ? AND is_active = 1';
+      const sql = `
+        SELECT 
+          id, username, email, password_hash as passwordHash, role, is_active as isActive, created_at as createdAt,
+          name, surname, team, region, job_level as jobLevel, 
+          billable_rate as billableRate, discount_percentage as discountPercentage, 
+          target_utilization as targetUtilization
+        FROM users 
+        WHERE id = ? AND is_active = 1
+      `;
       this.db.get(sql, [id], (err, row: any) => {
         if (err) {
           reject(err);
@@ -1394,7 +1469,15 @@ class DatabaseService {
     }
 
     return new Promise((resolve, reject) => {
-      const sql = 'SELECT id, username, email, role, is_active as isActive, created_at as createdAt FROM users ORDER BY created_at DESC';
+      const sql = `
+        SELECT 
+          id, username, email, role, is_active as isActive, created_at as createdAt,
+          name, surname, team, region, job_level as jobLevel, 
+          billable_rate as billableRate, discount_percentage as discountPercentage, 
+          target_utilization as targetUtilization
+        FROM users 
+        ORDER BY created_at DESC
+      `;
       this.db.all(sql, (err, rows: any[]) => {
         if (err) {
           reject(err);
