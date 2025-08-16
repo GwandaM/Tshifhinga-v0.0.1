@@ -20,6 +20,7 @@ import CalendarPage from "./pages/Calendar";
 import Reports from "./pages/Reports";
 import UserManagement from "./pages/admin/UserManagement";
 import ActivityMonitoring from "./pages/admin/ActivityMonitoring";
+import ProjectManagement from "./pages/admin/ProjectManagement";
 
 const queryClient = new QueryClient();
 
@@ -93,30 +94,34 @@ const App = () => {
               <TimerProvider>
               <BrowserRouter>
                 <SidebarProvider defaultOpen={false}>
-                  {!isFullScreen && (
-                    <header className="h-12 flex items-center justify-between gap-3 border-b px-3 bg-background">
-                      <div className="flex items-center gap-3">
-                        <SidebarTrigger className="h-8 w-8 border rounded-md hover:bg-accent hover:text-accent-foreground" />
-                        <NavLink to="/" className="text-sm font-semibold tracking-tight">Tshifhinga</NavLink>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={switchToMini}
-                          className="h-8 px-3 text-xs"
-                          title="Switch to Mini View"
-                        >
-                          <Minimize2 className="h-3 w-3 mr-1" />
-                          Mini View
-                        </Button>
-                        <ThemeToggle />
-                      </div>
-                    </header>
-                  )}
-                  <div className="flex min-h-screen w-full">
-                    {!isFullScreen && <AppSidebar />}
-                    <main className="flex-1">
+                  <div className="min-h-screen w-full">
+                    {/* Fixed Header */}
+                    {!isFullScreen && (
+                      <header className="fixed top-0 left-0 right-0 z-50 h-12 flex items-center justify-between gap-3 border-b px-4 bg-background">
+                        <div className="flex items-center gap-3">
+                          <SidebarTrigger className="h-8 w-8 border rounded-md hover:bg-accent hover:text-accent-foreground" />
+                          <NavLink to="/" className="text-sm font-semibold tracking-tight">Tshifhinga</NavLink>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={switchToMini}
+                            className="h-8 px-3 text-xs"
+                            title="Switch to Mini View"
+                          >
+                            <Minimize2 className="h-3 w-3 mr-1" />
+                            Mini View
+                          </Button>
+                          <ThemeToggle />
+                        </div>
+                      </header>
+                    )}
+                    
+                    {/* Main Layout */}
+                    <div className="flex" style={{ marginTop: isFullScreen ? '0' : '48px' }}>
+                      {!isFullScreen && <AppSidebar />}
+                      <main className="flex-1 min-h-screen">
                       <ProtectedRoute>
                         <Routes>
                           <Route path="/" element={<Index />} />
@@ -138,11 +143,20 @@ const App = () => {
                               </ProtectedRoute>
                             } 
                           />
+                          <Route 
+                            path="/admin/projects" 
+                            element={
+                              <ProtectedRoute requiredPermission="manage_projects">
+                                <ProjectManagement />
+                              </ProtectedRoute>
+                            } 
+                          />
                           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                           <Route path="*" element={<Index />} />
                         </Routes>
                       </ProtectedRoute>
-                    </main>
+                      </main>
+                    </div>
                   </div>
                 </SidebarProvider>
               </BrowserRouter>

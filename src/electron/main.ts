@@ -698,6 +698,67 @@ ipcMain.handle('db:exportToJSON', async () => {
   return await dbService.exportToJSON();
 });
 
+// Project Management CRUD operations
+ipcMain.handle('db:getAllClients', async () => {
+  return await dbService.getAllClients();
+});
+ipcMain.handle('db:getProjectsByClient', async (_, clientId) => {
+  return await dbService.getProjectsByClient(clientId);
+});
+ipcMain.handle('db:getTasksByProject', async (_, projectId) => {
+  return await dbService.getTasksByProject(projectId);
+});
+ipcMain.handle('db:updateClient', async (_, id, name) => {
+  return await dbService.updateClient(id, name);
+});
+ipcMain.handle('db:updateProject', async (_, id, name, clientId) => {
+  return await dbService.updateProject(id, name, clientId);
+});
+ipcMain.handle('db:updateTask', async (_, id, name, projectId) => {
+  return await dbService.updateTask(id, name, projectId);
+});
+ipcMain.handle('db:deleteClient', async (_, id) => {
+  return await dbService.deleteClient(id);
+});
+ipcMain.handle('db:deleteProject', async (_, id) => {
+  return await dbService.deleteProject(id);
+});
+ipcMain.handle('db:deleteTask', async (_, id) => {
+  return await dbService.deleteTask(id);
+});
+ipcMain.handle('db:copyTask', async (_, sourceTaskId, targetProjectId) => {
+  return await dbService.copyTask(sourceTaskId, targetProjectId);
+});
+ipcMain.handle('db:createDefaultProjectStructure', async () => {
+  return await dbService.createDefaultProjectStructure();
+});
+ipcMain.handle('db:exportToXLSX', async () => {
+  return await dbService.exportToXLSX();
+});
+
+// Configuration data handlers
+ipcMain.handle('db:getTeams', async () => {
+  return await dbService.getTeams();
+});
+ipcMain.handle('db:getRegions', async () => {
+  return await dbService.getRegions();
+});
+ipcMain.handle('db:getJobLevels', async () => {
+  return await dbService.getJobLevels();
+});
+ipcMain.handle('db:getBillableRateByJobLevel', async (_, jobLevelCode) => {
+  return await dbService.getBillableRateByJobLevel(jobLevelCode);
+});
+ipcMain.handle('db:createTeam', async (_, name, description) => {
+  return await dbService.createTeam(name, description);
+});
+ipcMain.handle('db:createRegion', async (_, name) => {
+  return await dbService.createRegion(name);
+});
+ipcMain.handle('db:createJobLevel', async (_, name, defaultRate) => {
+  return await dbService.createJobLevel(name, defaultRate);
+});
+
 // File save dialog handler
 ipcMain.handle('showSaveDialog', async (_, options) => {
   const result = await dialog.showSaveDialog(options);
@@ -720,8 +781,8 @@ ipcMain.handle('auth:login', async (_, username, password) => {
   return await authService.login(username, password);
 });
 
-ipcMain.handle('auth:register', async (_, username, email, password, role) => {
-  return await authService.register(username, email, password, role);
+ipcMain.handle('auth:register', async (_, username, email, password, role, additionalData) => {
+  return await authService.register(username, email, password, role, additionalData);
 });
 
 ipcMain.handle('auth:verify-token', async (_, token) => {

@@ -23,9 +23,18 @@ interface UserRecord {
   username: string;
   email: string;
   passwordHash: string;
-  role: 'admin' | 'user';
+  role: 'admin' | 'user' | 'director';
   isActive: boolean;
   createdAt: number;
+  // Enhanced user fields
+  name?: string;
+  surname?: string;
+  team?: string;
+  region?: string;
+  jobLevel?: string;
+  billableRate?: number; // ZAR per hour
+  discountPercentage?: number; // default 0%
+  targetUtilization?: number; // percentage
 }
 
 interface ProjectPermissionRecord {
@@ -228,7 +237,16 @@ class DatabaseService {
         role TEXT NOT NULL DEFAULT 'user',
         is_active BOOLEAN DEFAULT 1,
         created_at INTEGER NOT NULL,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        -- Enhanced user fields
+        name TEXT,
+        surname TEXT,
+        team TEXT,
+        region TEXT,
+        job_level TEXT,
+        billable_rate REAL DEFAULT 0,
+        discount_percentage REAL DEFAULT 0,
+        target_utilization REAL DEFAULT 80
       )
     `;
 
@@ -245,8 +263,56 @@ class DatabaseService {
       )
     `;
 
+    // Configuration tables
+    const createTeamsTable = `
+      CREATE TABLE IF NOT EXISTS teams (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT,
+        is_active BOOLEAN DEFAULT 1,
+        created_at INTEGER NOT NULL
+      )
+    `;
+
+    const createRegionsTable = `
+      CREATE TABLE IF NOT EXISTS regions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        code TEXT NOT NULL UNIQUE,
+        description TEXT,
+        is_active BOOLEAN DEFAULT 1,
+        created_at INTEGER NOT NULL
+      )
+    `;
+
+    const createJobLevelsTable = `
+      CREATE TABLE IF NOT EXISTS job_levels (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        description TEXT,
+        level_order INTEGER,
+        is_active BOOLEAN DEFAULT 1,
+        created_at INTEGER NOT NULL
+      )
+    `;
+
+    const createBillableRatesTable = `
+      CREATE TABLE IF NOT EXISTS billable_rates_by_job_level (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_level_code TEXT NOT NULL,
+        rate_zar_per_hour REAL NOT NULL,
+        effective_from DATE NOT NULL,
+        effective_to DATE,
+        is_active BOOLEAN DEFAULT 1,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (job_level_code) REFERENCES job_levels(code) ON DELETE CASCADE
+      )
+    `;
+
       let completedTables = 0;
-      const totalTables = 6;
+      const totalTables = 10; // Updated to include new tables
       let hasError = false;
 
       const checkCompletion = () => {
@@ -254,6 +320,7 @@ class DatabaseService {
         if (completedTables === totalTables && !hasError) {
           this.createIndexes();
           this.seedInitialData();
+          this.seedConfigurationData();
           resolve();
         }
       };
@@ -328,6 +395,49 @@ class DatabaseService {
             checkCompletion();
           }
         });
+
+        // Create configuration tables
+        this.db.run(createTeamsTable, (err: any) => {
+          if (err) {
+            console.error('Error creating teams table:', err);
+            handleError(err);
+          } else {
+            console.log('Teams table ready');
+            this.addCodeColumnToTeamsTableIfMissing(() => {
+              checkCompletion();
+            });
+          }
+        });
+
+        this.db.run(createRegionsTable, (err: any) => {
+          if (err) {
+            console.error('Error creating regions table:', err);
+            handleError(err);
+          } else {
+            console.log('Regions table ready');
+            checkCompletion();
+          }
+        });
+
+        this.db.run(createJobLevelsTable, (err: any) => {
+          if (err) {
+            console.error('Error creating job levels table:', err);
+            handleError(err);
+          } else {
+            console.log('Job levels table ready');
+            checkCompletion();
+          }
+        });
+
+        this.db.run(createBillableRatesTable, (err: any) => {
+          if (err) {
+            console.error('Error creating billable rates table:', err);
+            handleError(err);
+          } else {
+            console.log('Billable rates table ready');
+            checkCompletion();
+          }
+        });
       });
     });
   }
@@ -396,6 +506,50 @@ class DatabaseService {
         });
       } else {
         console.log('user_id column already exists');
+      }
+    });
+  }
+
+  private addCodeColumnToTeamsTableIfMissing(callback?: () => void): void {
+    if (!this.db) {
+      if (callback) callback();
+      return;
+    }
+
+    console.log('Checking if code column exists in teams table...');
+    // Check if code column exists
+    this.db.all("PRAGMA table_info(teams)", (err, columns: any[]) => {
+      if (err) {
+        console.error('Error checking table structure for code:', err);
+        if (callback) callback();
+        return;
+      }
+
+      const hasCodeColumn = columns.some(col => col.name === 'code');
+      console.log('hasCodeColumn:', hasCodeColumn);
+      
+      if (!hasCodeColumn) {
+        console.log('Adding code column to existing teams table...');
+        this.db.run("ALTER TABLE teams ADD COLUMN code TEXT DEFAULT ''", (alterErr) => {
+          if (alterErr) {
+            console.error('Error adding code column:', alterErr);
+            if (callback) callback();
+          } else {
+            console.log('Successfully added code column');
+            // Now add the unique constraint after column is added
+            this.db.run("CREATE UNIQUE INDEX IF NOT EXISTS idx_teams_code ON teams(code)", (indexErr) => {
+              if (indexErr) {
+                console.error('Error creating unique index on code column:', indexErr);
+              } else {
+                console.log('Successfully created unique index on code column');
+              }
+              if (callback) callback();
+            });
+          }
+        });
+      } else {
+        console.log('code column already exists');
+        if (callback) callback();
       }
     });
   }
@@ -485,6 +639,80 @@ class DatabaseService {
       }
     }
     console.log('Initial hierarchy data seeded successfully');
+  }
+
+  private seedConfigurationData(): void {
+    if (!this.db) return;
+
+    // Seed teams
+    const teams = [
+      { code: 'LIFE', name: 'Life', description: 'Life Insurance' },
+      { code: 'NON_LIFE', name: 'Non-Life', description: 'Non-Life Insurance' },
+      { code: 'ACCOUNTING', name: 'Accounting', description: 'Accounting and Finance' },
+      { code: 'ADVISORY', name: 'Advisory', description: 'Advisory Services' },
+      { code: 'OPERATIONS', name: 'Operations', description: 'Operations Support' },
+      { code: 'IT', name: 'IT', description: 'Information Technology' }
+    ];
+
+    teams.forEach(team => {
+      this.db.run('INSERT OR IGNORE INTO teams (code, name, description, created_at) VALUES (?, ?, ?, ?)', 
+        [team.code, team.name, team.description, Date.now()]);
+    });
+
+    // Seed regions  
+    const regions = [
+      { name: 'Cape Town', code: 'CPT', description: 'Cape Town Office' },
+      { name: 'Johannesburg', code: 'JHB', description: 'Johannesburg Office' },
+      { name: 'Kenya', code: 'KEN', description: 'Kenya Office' },
+      { name: 'United Kingdom', code: 'UK', description: 'UK Office' },
+      { name: 'Namibia', code: 'NAM', description: 'Namibia Office' }
+    ];
+
+    regions.forEach(region => {
+      this.db.run('INSERT OR IGNORE INTO regions (name, code, description, created_at) VALUES (?, ?, ?, ?)', 
+        [region.name, region.code, region.description, Date.now()]);
+    });
+
+    // Seed job levels
+    const jobLevels = [
+      { code: 'JA', name: 'Junior Associate', level_order: 1 },
+      { code: 'A', name: 'Associate', level_order: 2 },
+      { code: 'SA', name: 'Senior Associate', level_order: 3 },
+      { code: 'AM', name: 'Assistant Manager', level_order: 4 },
+      { code: 'M', name: 'Manager', level_order: 5 },
+      { code: 'SM', name: 'Senior Manager', level_order: 6 },
+      { code: 'AD', name: 'Associate Director', level_order: 7 },
+      { code: 'SAD', name: 'Senior Associate Director', level_order: 8 },
+      { code: 'D', name: 'Director', level_order: 9 },
+      { code: 'P', name: 'Partner', level_order: 10 }
+    ];
+
+    jobLevels.forEach(level => {
+      this.db.run('INSERT OR IGNORE INTO job_levels (code, name, level_order, created_at) VALUES (?, ?, ?, ?)', 
+        [level.code, level.name, level.level_order, Date.now()]);
+    });
+
+    // Seed billable rates (dummy data in ZAR per hour)
+    const billableRates = [
+      { job_level_code: 'JA', rate_zar_per_hour: 450 },
+      { job_level_code: 'A', rate_zar_per_hour: 650 },
+      { job_level_code: 'SA', rate_zar_per_hour: 850 },
+      { job_level_code: 'AM', rate_zar_per_hour: 1100 },
+      { job_level_code: 'M', rate_zar_per_hour: 1400 },
+      { job_level_code: 'SM', rate_zar_per_hour: 1750 },
+      { job_level_code: 'AD', rate_zar_per_hour: 2200 },
+      { job_level_code: 'SAD', rate_zar_per_hour: 2800 },
+      { job_level_code: 'D', rate_zar_per_hour: 3500 },
+      { job_level_code: 'P', rate_zar_per_hour: 4500 }
+    ];
+
+    const today = new Date().toISOString().split('T')[0];
+    billableRates.forEach(rate => {
+      this.db.run('INSERT OR IGNORE INTO billable_rates_by_job_level (job_level_code, rate_zar_per_hour, effective_from, created_at) VALUES (?, ?, ?, ?)', 
+        [rate.job_level_code, rate.rate_zar_per_hour, today, Date.now()]);
+    });
+
+    console.log('Configuration data seeded successfully');
   }
 
   async getAllSessions(): Promise<SessionRecord[]> {
@@ -848,87 +1076,101 @@ class DatabaseService {
     return JSON.stringify(sessions, null, 2);
   }
 
-  // Hierarchy CRUD operations
-  async insertClient(name: string): Promise<number> {
-    return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error('Database not initialized'));
-        return;
+  // XLSX Export functionality
+  async exportToXLSX(): Promise<any> {
+    try {
+      // Get all data for export
+      const [clients, sessions, users, hierarchy] = await Promise.all([
+        this.getAllClients(),
+        this.getAllSessions(),
+        this.getAllUsers(),
+        this.getHierarchy()
+      ]);
+
+      // Prepare data for different sheets
+      const clientsData = clients.map(client => ({
+        id: client.id,
+        name: client.name,
+        created_at: new Date(client.created_at).toISOString(),
+        project_count: client.project_count,
+        task_count: client.task_count
+      }));
+
+      // Flatten hierarchy for projects sheet
+      const projectsData: any[] = [];
+      const tasksData: any[] = [];
+      
+      hierarchy.forEach((client: any) => {
+        client.projects.forEach((project: any) => {
+          projectsData.push({
+            id: Math.random(), // Will be replaced with proper ID in real implementation
+            name: project.name,
+            client_name: client.name,
+            created_at: new Date().toISOString(),
+            task_count: project.tasks.length
+          });
+          
+          project.tasks.forEach((taskName: string) => {
+            tasksData.push({
+              id: Math.random(), // Will be replaced with proper ID in real implementation
+              name: taskName,
+              project_name: project.name,
+              client_name: client.name,
+              created_at: new Date().toISOString()
+            });
+          });
+        });
+      });
+
+      // Get user permissions data
+      const permissionsData: any[] = [];
+      for (const user of users) {
+        try {
+          const projectPermissions = await this.getUserProjectPermissions(user.id);
+          projectPermissions.forEach(projectId => {
+            // Find project and client names
+            const project = projectsData.find(p => p.id === projectId);
+            if (project) {
+              permissionsData.push({
+                username: user.username,
+                client_name: project.client_name,
+                project_name: project.name,
+                can_track_time: true
+              });
+            }
+          });
+        } catch (error) {
+          console.error(`Error getting permissions for user ${user.username}:`, error);
+        }
       }
 
-      const sql = 'INSERT INTO clients (name, created_at) VALUES (?, ?)';
-      const db = this.db;
-      db.run(sql, [name, Date.now()], function(err) {
-        if (err) {
-          if (err.message.includes('UNIQUE constraint failed')) {
-            // Client already exists, get its ID
-            db.get('SELECT id FROM clients WHERE name = ?', [name], (getErr, row: any) => {
-              if (getErr) reject(getErr);
-              else resolve(row.id);
-            });
-          } else {
-            reject(err);
-          }
-        } else {
-          resolve(this.lastID);
-        }
-      });
-    });
+      return {
+        Clients: clientsData,
+        Projects: projectsData,
+        Tasks: tasksData,
+        User_Permissions: permissionsData,
+        Sessions: sessions.map(session => ({
+          id: session.id,
+          client: session.client,
+          project: session.project,
+          task: session.task,
+          start_time: new Date(session.start).toISOString(),
+          end_time: session.end ? new Date(session.end).toISOString() : '',
+          active_hours: (session.activeMs / (1000 * 60 * 60)).toFixed(2),
+          paused_hours: (session.pausedMs / (1000 * 60 * 60)).toFixed(2),
+          is_billable: session.isBillable ? 'Yes' : 'No',
+          notes: session.notes || '',
+          username: session.userId ? users.find(u => u.id === session.userId)?.username || '' : '',
+          created_at: new Date(session.createdAt).toISOString()
+        }))
+      };
+    } catch (error) {
+      console.error('Error preparing XLSX export data:', error);
+      throw error;
+    }
   }
 
-  async insertProject(name: string, clientId: number): Promise<number> {
-    return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error('Database not initialized'));
-        return;
-      }
-
-      const sql = 'INSERT INTO projects (name, client_id, created_at) VALUES (?, ?, ?)';
-      const db = this.db;
-      db.run(sql, [name, clientId, Date.now()], function(err) {
-        if (err) {
-          if (err.message.includes('UNIQUE constraint failed')) {
-            // Project already exists, get its ID
-            db.get('SELECT id FROM projects WHERE name = ? AND client_id = ?', [name, clientId], (getErr, row: any) => {
-              if (getErr) reject(getErr);
-              else resolve(row.id);
-            });
-          } else {
-            reject(err);
-          }
-        } else {
-          resolve(this.lastID);
-        }
-      });
-    });
-  }
-
-  async insertTask(name: string, projectId: number): Promise<number> {
-    return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error('Database not initialized'));
-        return;
-      }
-
-      const sql = 'INSERT INTO tasks (name, project_id, created_at) VALUES (?, ?, ?)';
-      const db = this.db;
-      db.run(sql, [name, projectId, Date.now()], function(err) {
-        if (err) {
-          if (err.message.includes('UNIQUE constraint failed')) {
-            // Task already exists, get its ID
-            db.get('SELECT id FROM tasks WHERE name = ? AND project_id = ?', [name, projectId], (getErr, row: any) => {
-              if (getErr) reject(getErr);
-              else resolve(row.id);
-            });
-          } else {
-            reject(err);
-          }
-        } else {
-          resolve(this.lastID);
-        }
-      });
-    });
-  }
+  // Hierarchy CRUD operations - moved to enhanced versions below
 
   async migrateHierarchyFromLocalStorage(localStorageData: any[]): Promise<void> {
     if (!Array.isArray(localStorageData) || localStorageData.length === 0) {
@@ -1196,6 +1438,756 @@ class DatabaseService {
           reject(err);
         } else {
           resolve();
+        }
+      });
+    });
+  }
+
+  // Project Management CRUD Operations
+  
+  // Duplicate validation helpers
+  async checkClientExists(name: string, excludeId?: number): Promise<boolean> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      const sql = excludeId 
+        ? 'SELECT COUNT(*) as count FROM clients WHERE LOWER(name) = LOWER(?) AND id != ?'
+        : 'SELECT COUNT(*) as count FROM clients WHERE LOWER(name) = LOWER(?)';
+      const params = excludeId ? [name, excludeId] : [name];
+      
+      this.db.get(sql, params, (err, row: any) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(row.count > 0);
+        }
+      });
+    });
+  }
+
+  async checkProjectExists(name: string, clientId: number, excludeId?: number): Promise<boolean> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      const sql = excludeId 
+        ? 'SELECT COUNT(*) as count FROM projects WHERE LOWER(name) = LOWER(?) AND client_id = ? AND id != ?'
+        : 'SELECT COUNT(*) as count FROM projects WHERE LOWER(name) = LOWER(?) AND client_id = ?';
+      const params = excludeId ? [name, clientId, excludeId] : [name, clientId];
+      
+      this.db.get(sql, params, (err, row: any) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(row.count > 0);
+        }
+      });
+    });
+  }
+
+  async checkTaskExists(name: string, projectId: number, excludeId?: number): Promise<boolean> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      const sql = excludeId 
+        ? 'SELECT COUNT(*) as count FROM tasks WHERE LOWER(name) = LOWER(?) AND project_id = ? AND id != ?'
+        : 'SELECT COUNT(*) as count FROM tasks WHERE LOWER(name) = LOWER(?) AND project_id = ?';
+      const params = excludeId ? [name, projectId, excludeId] : [name, projectId];
+      
+      this.db.get(sql, params, (err, row: any) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(row.count > 0);
+        }
+      });
+    });
+  }
+
+  // Update operations
+  async updateClient(id: number, name: string): Promise<void> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    const exists = await this.checkClientExists(name, id);
+    if (exists) {
+      throw new Error('A client with this name already exists');
+    }
+
+    return new Promise((resolve, reject) => {
+      const sql = 'UPDATE clients SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?';
+      this.db.run(sql, [name, id], function(err) {
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
+      });
+    });
+  }
+
+  async updateProject(id: number, name: string, clientId: number): Promise<void> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    const exists = await this.checkProjectExists(name, clientId, id);
+    if (exists) {
+      throw new Error('A project with this name already exists for this client');
+    }
+
+    return new Promise((resolve, reject) => {
+      const sql = 'UPDATE projects SET name = ?, client_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?';
+      this.db.run(sql, [name, clientId, id], function(err) {
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
+      });
+    });
+  }
+
+  async updateTask(id: number, name: string, projectId: number): Promise<void> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    const exists = await this.checkTaskExists(name, projectId, id);
+    if (exists) {
+      throw new Error('A task with this name already exists for this project');
+    }
+
+    return new Promise((resolve, reject) => {
+      const sql = 'UPDATE tasks SET name = ?, project_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?';
+      this.db.run(sql, [name, projectId, id], function(err) {
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
+      });
+    });
+  }
+
+  // Delete operations with cascade handling
+  async deleteClient(id: number): Promise<void> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      this.db.serialize(() => {
+        this.db.run('BEGIN TRANSACTION');
+        
+        // Delete all user permissions for projects under this client
+        this.db.run(`
+          DELETE FROM user_project_permissions 
+          WHERE project_id IN (SELECT id FROM projects WHERE client_id = ?)
+        `, [id], (err) => {
+          if (err) {
+            this.db.run('ROLLBACK');
+            reject(err);
+            return;
+          }
+          
+          // Delete all tasks for projects under this client
+          this.db.run(`
+            DELETE FROM tasks 
+            WHERE project_id IN (SELECT id FROM projects WHERE client_id = ?)
+          `, [id], (err) => {
+            if (err) {
+              this.db.run('ROLLBACK');
+              reject(err);
+              return;
+            }
+            
+            // Delete all projects under this client
+            this.db.run('DELETE FROM projects WHERE client_id = ?', [id], (err) => {
+              if (err) {
+                this.db.run('ROLLBACK');
+                reject(err);
+                return;
+              }
+              
+              // Finally delete the client
+              this.db.run('DELETE FROM clients WHERE id = ?', [id], (err) => {
+                if (err) {
+                  this.db.run('ROLLBACK');
+                  reject(err);
+                } else {
+                  this.db.run('COMMIT');
+                  resolve();
+                }
+              });
+            });
+          });
+        });
+      });
+    });
+  }
+
+  async deleteProject(id: number): Promise<void> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      this.db.serialize(() => {
+        this.db.run('BEGIN TRANSACTION');
+        
+        // Delete all user permissions for this project
+        this.db.run('DELETE FROM user_project_permissions WHERE project_id = ?', [id], (err) => {
+          if (err) {
+            this.db.run('ROLLBACK');
+            reject(err);
+            return;
+          }
+          
+          // Delete all tasks for this project
+          this.db.run('DELETE FROM tasks WHERE project_id = ?', [id], (err) => {
+            if (err) {
+              this.db.run('ROLLBACK');
+              reject(err);
+              return;
+            }
+            
+            // Finally delete the project
+            this.db.run('DELETE FROM projects WHERE id = ?', [id], (err) => {
+              if (err) {
+                this.db.run('ROLLBACK');
+                reject(err);
+              } else {
+                this.db.run('COMMIT');
+                resolve();
+              }
+            });
+          });
+        });
+      });
+    });
+  }
+
+  async deleteTask(id: number): Promise<void> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      const sql = 'DELETE FROM tasks WHERE id = ?';
+      this.db.run(sql, [id], function(err) {
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
+      });
+    });
+  }
+
+  // Enhanced hierarchy operations
+  async getAllClients(): Promise<any[]> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      const sql = `
+        SELECT 
+          c.id, c.name, c.created_at,
+          COUNT(DISTINCT p.id) as project_count,
+          COUNT(DISTINCT t.id) as task_count
+        FROM clients c
+        LEFT JOIN projects p ON c.id = p.client_id
+        LEFT JOIN tasks t ON p.id = t.project_id
+        GROUP BY c.id, c.name, c.created_at
+        ORDER BY c.name
+      `;
+
+      this.db.all(sql, (err, rows: any[]) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(rows);
+        }
+      });
+    });
+  }
+
+  async getProjectsByClient(clientId: number): Promise<any[]> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      const sql = `
+        SELECT 
+          p.id, p.name, p.client_id, p.created_at,
+          c.name as client_name,
+          COUNT(DISTINCT t.id) as task_count,
+          COUNT(DISTINCT upp.user_id) as user_count
+        FROM projects p
+        JOIN clients c ON p.client_id = c.id
+        LEFT JOIN tasks t ON p.id = t.project_id
+        LEFT JOIN user_project_permissions upp ON p.id = upp.project_id
+        WHERE p.client_id = ?
+        GROUP BY p.id, p.name, p.client_id, p.created_at, c.name
+        ORDER BY p.name
+      `;
+
+      this.db.all(sql, [clientId], (err, rows: any[]) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(rows);
+        }
+      });
+    });
+  }
+
+  async getTasksByProject(projectId: number): Promise<any[]> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      const sql = `
+        SELECT 
+          t.id, t.name, t.project_id, t.created_at,
+          p.name as project_name,
+          c.name as client_name
+        FROM tasks t
+        JOIN projects p ON t.project_id = p.id
+        JOIN clients c ON p.client_id = c.id
+        WHERE t.project_id = ?
+        ORDER BY t.name
+      `;
+
+      this.db.all(sql, [projectId], (err, rows: any[]) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(rows);
+        }
+      });
+    });
+  }
+
+  // Task copying functionality
+  async copyTask(sourceTaskId: number, targetProjectId: number): Promise<number> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      // First get the source task
+      this.db.get('SELECT name FROM tasks WHERE id = ?', [sourceTaskId], (err, row: any) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        
+        if (!row) {
+          reject(new Error('Source task not found'));
+          return;
+        }
+
+        // Check if task already exists in target project
+        this.checkTaskExists(row.name, targetProjectId).then(exists => {
+          if (exists) {
+            reject(new Error('Task already exists in target project'));
+            return;
+          }
+
+          // Insert the copied task
+          const sql = 'INSERT INTO tasks (name, project_id, created_at) VALUES (?, ?, ?)';
+          this.db.run(sql, [row.name, targetProjectId, Date.now()], function(err) {
+            if (err) {
+              reject(err);
+            } else {
+              resolve(this.lastID);
+            }
+          });
+        }).catch(reject);
+      });
+    });
+  }
+
+  // Default project structure for new users
+  async createDefaultProjectStructure(): Promise<void> {
+    try {
+      const companyClientId = await this.insertClient('Company');
+      
+      const defaultProjects = ['Admin', 'Meetings', 'Training', 'Events'];
+      
+      for (const projectName of defaultProjects) {
+        try {
+          const projectId = await this.insertProject(projectName, companyClientId);
+          // Add a default task for each project
+          await this.insertTask('General', projectId);
+        } catch (error) {
+          // Project might already exist, continue
+          console.log(`Project ${projectName} might already exist:`, error);
+        }
+      }
+    } catch (error) {
+      console.error('Error creating default project structure:', error);
+      throw error;
+    }
+  }
+
+  // Enhanced insertClient with duplicate validation
+  async insertClient(name: string): Promise<number> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      // First check if client already exists (case-insensitive)
+      this.checkClientExists(name).then(exists => {
+        if (exists) {
+          // Get existing client ID
+          this.db.get('SELECT id FROM clients WHERE LOWER(name) = LOWER(?)', [name], (err: any, row: any) => {
+            if (err) reject(err);
+            else resolve(row.id);
+          });
+        } else {
+          // Insert new client
+          const sql = 'INSERT INTO clients (name, created_at) VALUES (?, ?)';
+          this.db.run(sql, [name, Date.now()], function(err: any) {
+            if (err) {
+              reject(err);
+            } else {
+              resolve(this.lastID);
+            }
+          });
+        }
+      }).catch(reject);
+    });
+  }
+
+  // Enhanced insertProject with duplicate validation
+  async insertProject(name: string, clientId: number): Promise<number> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      this.checkProjectExists(name, clientId).then(exists => {
+        if (exists) {
+          // Get existing project ID
+          this.db.get('SELECT id FROM projects WHERE LOWER(name) = LOWER(?) AND client_id = ?', [name, clientId], (err: any, row: any) => {
+            if (err) reject(err);
+            else resolve(row.id);
+          });
+        } else {
+          // Insert new project
+          const sql = 'INSERT INTO projects (name, client_id, created_at) VALUES (?, ?, ?)';
+          this.db.run(sql, [name, clientId, Date.now()], function(err: any) {
+            if (err) {
+              reject(err);
+            } else {
+              resolve(this.lastID);
+            }
+          });
+        }
+      }).catch(reject);
+    });
+  }
+
+  // Enhanced insertTask with duplicate validation
+  async insertTask(name: string, projectId: number): Promise<number> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      this.checkTaskExists(name, projectId).then(exists => {
+        if (exists) {
+          // Get existing task ID
+          this.db.get('SELECT id FROM tasks WHERE LOWER(name) = LOWER(?) AND project_id = ?', [name, projectId], (err: any, row: any) => {
+            if (err) reject(err);
+            else resolve(row.id);
+          });
+        } else {
+          // Insert new task
+          const sql = 'INSERT INTO tasks (name, project_id, created_at) VALUES (?, ?, ?)';
+          this.db.run(sql, [name, projectId, Date.now()], function(err: any) {
+            if (err) {
+              reject(err);
+            } else {
+              resolve(this.lastID);
+            }
+          });
+        }
+      }).catch(reject);
+    });
+  }
+
+  // Configuration data methods
+  async getTeams(): Promise<any[]> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      this.db.all('SELECT * FROM teams WHERE is_active = 1 ORDER BY name', (err: any, rows: any[]) => {
+        if (err) reject(err);
+        else resolve(rows);
+      });
+    });
+  }
+
+  async getRegions(): Promise<any[]> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      this.db.all('SELECT * FROM regions WHERE is_active = 1 ORDER BY name', (err: any, rows: any[]) => {
+        if (err) reject(err);
+        else resolve(rows);
+      });
+    });
+  }
+
+  async getJobLevels(): Promise<any[]> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      this.db.all('SELECT * FROM job_levels WHERE is_active = 1 ORDER BY level_order', (err: any, rows: any[]) => {
+        if (err) reject(err);
+        else resolve(rows);
+      });
+    });
+  }
+
+  async getBillableRateByJobLevel(jobLevelCode: string): Promise<number> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      const sql = `
+        SELECT rate_zar_per_hour 
+        FROM billable_rates_by_job_level 
+        WHERE job_level_code = ? AND is_active = 1 
+        AND (effective_to IS NULL OR effective_to >= date('now'))
+        ORDER BY effective_from DESC 
+        LIMIT 1
+      `;
+      
+      this.db.get(sql, [jobLevelCode], (err: any, row: any) => {
+        if (err) reject(err);
+        else resolve(row?.rate_zar_per_hour || 0);
+      });
+    });
+  }
+
+  // Configuration data CRUD methods
+  async createTeam(name: string, description?: string): Promise<string> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      // Generate code from name (uppercase, replace spaces with underscores)
+      const code = name.toUpperCase().replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, '');
+      
+      // Check if team with this code already exists
+      this.db.get('SELECT code FROM teams WHERE code = ?', [code], (err: any, row: any) => {
+        if (err) return reject(err);
+        if (row) return reject(new Error('Team with this name already exists'));
+        
+        // Insert new team
+        const sql = 'INSERT INTO teams (code, name, description, created_at, is_active) VALUES (?, ?, ?, ?, 1)';
+        this.db.run(sql, [code, name, description, Date.now()], function(err: any) {
+          if (err) reject(err);
+          else resolve(code);
+        });
+      });
+    });
+  }
+
+  async createRegion(name: string): Promise<string> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      // Generate code from name (uppercase, replace spaces with underscores)
+      const code = name.toUpperCase().replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, '');
+      
+      // Check if region with this code already exists
+      this.db.get('SELECT code FROM regions WHERE code = ?', [code], (err: any, row: any) => {
+        if (err) return reject(err);
+        if (row) return reject(new Error('Region with this name already exists'));
+        
+        // Insert new region
+        const sql = 'INSERT INTO regions (code, name, is_active) VALUES (?, ?, 1)';
+        this.db.run(sql, [code, name], function(err: any) {
+          if (err) reject(err);
+          else resolve(code);
+        });
+      });
+    });
+  }
+
+  async createJobLevel(name: string, defaultRate?: number): Promise<string> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      // Generate code from name (uppercase, replace spaces with underscores)
+      const code = name.toUpperCase().replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, '');
+      
+      // Check if job level with this code already exists
+      this.db.get('SELECT code FROM job_levels WHERE code = ?', [code], (err: any, row: any) => {
+        if (err) return reject(err);
+        if (row) return reject(new Error('Job level with this name already exists'));
+        
+        // Get the next level order
+        this.db.get('SELECT MAX(level_order) as max_order FROM job_levels', [], (err: any, orderRow: any) => {
+          if (err) return reject(err);
+          
+          const nextOrder = (orderRow?.max_order || 0) + 1;
+          
+          // Insert new job level
+          const sql = 'INSERT INTO job_levels (code, name, level_order, is_active) VALUES (?, ?, ?, 1)';
+          this.db.run(sql, [code, name, nextOrder], function(err: any) {
+            if (err) return reject(err);
+            
+            // If default rate is provided, create a billable rate entry
+            if (defaultRate && defaultRate > 0) {
+              const rateSql = `
+                INSERT INTO billable_rates_by_job_level 
+                (job_level_code, rate_zar_per_hour, effective_from, is_active) 
+                VALUES (?, ?, date('now'), 1)
+              `;
+              
+              this.db.run(rateSql, [code, defaultRate], (rateErr: any) => {
+                if (rateErr) console.error('Failed to create default rate:', rateErr);
+                resolve(code);
+              });
+            } else {
+              resolve(code);
+            }
+          });
+        });
+      });
+    });
+  }
+
+  // Enhanced user creation with new fields
+  async createUserEnhanced(userData: {
+    username: string;
+    email: string;
+    passwordHash: string;
+    role?: 'admin' | 'user' | 'director';
+    name?: string;
+    surname?: string;
+    team?: string;
+    region?: string;
+    jobLevel?: string;
+    billableRate?: number;
+    discountPercentage?: number;
+    targetUtilization?: number;
+  }): Promise<number> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    // Auto-populate billable rate if job level is provided but rate is not
+    let finalBillableRate = userData.billableRate;
+    if (userData.jobLevel && !finalBillableRate) {
+      finalBillableRate = await this.getBillableRateByJobLevel(userData.jobLevel);
+    }
+
+    return new Promise((resolve, reject) => {
+      const sql = `
+        INSERT INTO users (
+          username, email, password_hash, role, name, surname, team, region, 
+          job_level, billable_rate, discount_percentage, target_utilization, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `;
+
+      this.db.run(sql, [
+        userData.username,
+        userData.email,
+        userData.passwordHash,
+        userData.role || 'user',
+        userData.name || null,
+        userData.surname || null,
+        userData.team || null,
+        userData.region || null,
+        userData.jobLevel || null,
+        finalBillableRate || 0,
+        userData.discountPercentage || 0,
+        userData.targetUtilization || 80,
+        Date.now()
+      ], function(err: any) {
+        if (err) {
+          console.error('Error creating user in database:', err);
+          reject(err);
+        } else {
+          resolve(this.lastID);
         }
       });
     });

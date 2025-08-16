@@ -31,6 +31,14 @@ interface UserData {
   role: 'admin' | 'user';
   isActive: boolean;
   createdAt: number;
+  name?: string;
+  surname?: string;
+  team?: string;
+  region?: string;
+  jobLevel?: string;
+  billableRate?: number;
+  discountPercentage?: number;
+  targetUtilization?: number;
 }
 
 export default function UserManagement() {
@@ -75,9 +83,14 @@ export default function UserManagement() {
 
   // Filter users based on search and filters
   const filteredUsers = users.filter(user => {
+    const searchLower = searchTerm.toLowerCase();
     const matchesSearch = 
-      user.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      user.email.toLowerCase().includes(searchTerm.toLowerCase());
+      user.username.toLowerCase().includes(searchLower) ||
+      user.email.toLowerCase().includes(searchLower) ||
+      (user.name && user.name.toLowerCase().includes(searchLower)) ||
+      (user.surname && user.surname.toLowerCase().includes(searchLower)) ||
+      (user.team && user.team.toLowerCase().includes(searchLower)) ||
+      (user.region && user.region.toLowerCase().includes(searchLower));
     
     const matchesRole = roleFilter === 'all' || user.role === roleFilter;
     const matchesStatus = statusFilter === 'all' || 
@@ -196,7 +209,7 @@ export default function UserManagement() {
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Search by username or email..."
+                  placeholder="Search by username, email, name, team, or region..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pl-9"

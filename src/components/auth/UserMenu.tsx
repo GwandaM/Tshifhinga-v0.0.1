@@ -54,25 +54,17 @@ export function UserMenu({ showAuthDialog = false }: UserMenuProps) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" className="w-full justify-start p-2">
-          <Avatar className="h-8 w-8 mr-3">
-            <AvatarFallback className="text-xs">
+        <Button variant="ghost" className="p-2">
+          <Avatar className="h-8 w-8">
+            <AvatarFallback className={`text-xs text-white ${user.role === 'admin' ? 'bg-red-500' : 'bg-gray-500'}`}>
               {getInitials(user.username)}
             </AvatarFallback>
           </Avatar>
-          <div className="flex-1 text-left">
-            <div className="font-medium text-sm">{user.username}</div>
-            <div className="flex items-center gap-1 mt-1">
-              {user.role === 'admin' && <Shield className="h-3 w-3 text-red-500" />}
-              <span className="text-xs text-muted-foreground capitalize">{user.role}</span>
-            </div>
-          </div>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent className="w-56" align="end" forceMount>
         <DropdownMenuLabel className="font-normal">
           <div className="flex flex-col space-y-1">
-            <p className="text-sm font-medium leading-none">{user.username}</p>
             <p className="text-xs leading-none text-muted-foreground">
               {user.email}
             </p>

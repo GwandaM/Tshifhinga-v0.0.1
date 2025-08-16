@@ -6,7 +6,15 @@ interface AuthUser {
   id: number;
   username: string;
   email: string;
-  role: 'admin' | 'user';
+  role: 'admin' | 'user' | 'director';
+  name?: string;
+  surname?: string;
+  team?: string;
+  region?: string;
+  jobLevel?: string;
+  billableRate?: number;
+  discountPercentage?: number;
+  targetUtilization?: number;
 }
 
 interface LoginResponse {
@@ -53,7 +61,22 @@ class AuthService {
     }
   }
 
-  async register(username: string, email: string, password: string, role: 'admin' | 'user' = 'user'): Promise<RegisterResponse> {
+  async register(
+    username: string, 
+    email: string, 
+    password: string, 
+    role: 'admin' | 'user' | 'director' = 'user',
+    additionalData?: {
+      name?: string;
+      surname?: string;
+      team?: string;
+      region?: string;
+      jobLevel?: string;
+      billableRate?: number;
+      discountPercentage?: number;
+      targetUtilization?: number;
+    }
+  ): Promise<RegisterResponse> {
     try {
       // Validate input
       if (!username || !email || !password) {
@@ -70,21 +93,37 @@ class AuthService {
         return { success: false, error: 'Username already exists' };
       }
 
-      // Hash password and create user
+      // Hash password and create user with enhanced data
       const hashedPassword = await bcrypt.hash(password, 10);
-      const userId = await this.db.createUser(username, email, hashedPassword, role);
+      const userId = await this.db.createUserEnhanced({
+        username,
+        email,
+        passwordHash: hashedPassword,
+        role,
+        ...additionalData
+      });
 
       const user: AuthUser = {
         id: userId,
         username,
         email,
-        role
+        role,
+        ...additionalData
       };
+
+      // Create default project structure for new users
+      try {
+        await this.db.createDefaultProjectStructure();
+        console.log('Default project structure created for new user:', username);
+      } catch (structureError) {
+        console.error('Failed to create default project structure:', structureError);
+        // Don't fail registration if default structure creation fails
+      }
 
       return { success: true, user };
     } catch (error) {
       console.error('Registration error:', error);
-      return { success: false, error: 'Registration failed' };
+      return { success: false, error: error.message || 'Registration failed' };
     }
   }
 
