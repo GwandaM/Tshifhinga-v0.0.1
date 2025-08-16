@@ -13,6 +13,7 @@ let dbService: any;
 let authService: any;
 let mainWindow: any | null = null;
 let miniWindow: any | null = null;
+let taskSelectorWindow: any | null = null;
 let tray: any | null = null;
 let systemSleepTime: number | null = null;
 let currentTimerState: any = {
@@ -28,7 +29,7 @@ let timerInterval: NodeJS.Timeout | null = null;
 let windowState = {
   mode: 'full', // 'full', 'mini', 'tray'
   mainWindowBounds: { width: 1200, height: 800, x: undefined, y: undefined },
-  miniWindowBounds: { width: 420, height: 42, x: undefined, y: undefined },
+  miniWindowBounds: { width: 420, height: 50, x: undefined, y: undefined },
   transparency: 0.95,
   autoSwitch: {
     enabled: false,
@@ -105,9 +106,9 @@ const createMiniWindow = (): void => {
     x: windowState.miniWindowBounds.x,
     y: windowState.miniWindowBounds.y,
     minWidth: 380,
-    minHeight: 38,
+    minHeight: 50,
     maxWidth: 500,
-    maxHeight: 50,
+    maxHeight: 250,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -157,6 +158,50 @@ const createMiniWindow = (): void => {
   miniWindow.on('close', (event) => {
     event.preventDefault();
     switchToTray();
+  });
+};
+
+const createTaskSelectorWindow = (): void => {
+  // Create task selector window
+  taskSelectorWindow = new BrowserWindow({
+    width: 320,
+    height: 400,
+    minWidth: 300,
+    minHeight: 350,
+    maxWidth: 400,
+    maxHeight: 450,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      enableRemoteModule: false,
+      preload: pathJoin(__dirname, 'preload.js'),
+    },
+    frame: true,
+    modal: true,
+    parent: miniWindow || mainWindow,
+    alwaysOnTop: true,
+    resizable: true,
+    show: false,
+    title: 'Select Task',
+    titleBarStyle: 'default',
+  });
+
+  // Load task selector view
+  const taskSelectorUrl = isDev 
+    ? 'http://localhost:8080?mode=taskSelector' 
+    : `file://${pathJoin(__dirname, '../dist/index.html')}?mode=taskSelector`;
+  
+  taskSelectorWindow.loadURL(taskSelectorUrl);
+
+  // Show window when ready
+  taskSelectorWindow.once('ready-to-show', () => {
+    taskSelectorWindow.show();
+    taskSelectorWindow.focus();
+  });
+
+  // Handle window close
+  taskSelectorWindow.on('closed', () => {
+    taskSelectorWindow = null;
   });
 };
 
@@ -476,6 +521,105 @@ ipcMain.handle('window:get-mini-always-on-top-state', () => {
   }
   console.log('Mini window always on top state (stored):', windowState.miniAlwaysOnTop);
   return windowState.miniAlwaysOnTop;
+});
+
+// Mini window dynamic resizing handlers
+let isExpanded = false;
+let expandTimeout: NodeJS.Timeout | null = null;
+
+ipcMain.handle('window:expand-mini-for-dropdown', () => {
+  if (miniWindow && !miniWindow.isDestroyed() && !isExpanded) {
+    // Clear any pending collapse
+    if (expandTimeout) {
+      clearTimeout(expandTimeout);
+      expandTimeout = null;
+    }
+    
+    const currentBounds = miniWindow.getBounds();
+    const expandedHeight = 200; // Fixed expanded height for dropdown
+    
+    miniWindow.setSize(currentBounds.width, expandedHeight);
+    isExpanded = true;
+    console.log('Mini window expanded for dropdown');
+    return true;
+  }
+  return false;
+});
+
+ipcMain.handle('window:collapse-mini-from-dropdown', () => {
+  if (miniWindow && !miniWindow.isDestroyed() && isExpanded) {
+    // Immediate collapse when called (after task selection)
+    if (expandTimeout) {
+      clearTimeout(expandTimeout);
+      expandTimeout = null;
+    }
+    
+    const originalHeight = 50; // Original mini window height
+    const currentBounds = miniWindow.getBounds();
+    
+    miniWindow.setSize(currentBounds.width, originalHeight);
+    isExpanded = false;
+    console.log('Mini window collapsed from dropdown');
+    return true;
+  }
+  return false;
+});
+
+// Add a force collapse handler for cases where user clicks outside
+ipcMain.handle('window:force-collapse-mini', () => {
+  if (miniWindow && !miniWindow.isDestroyed() && isExpanded) {
+    if (expandTimeout) {
+      clearTimeout(expandTimeout);
+      expandTimeout = null;
+    }
+    
+    const originalHeight = 50;
+    const currentBounds = miniWindow.getBounds();
+    
+    miniWindow.setSize(currentBounds.width, originalHeight);
+    isExpanded = false;
+    console.log('Mini window force collapsed');
+    return true;
+  }
+  return false;
+});
+
+// Task selector window handlers
+ipcMain.handle('window:open-task-selector', () => {
+  if (!taskSelectorWindow) {
+    createTaskSelectorWindow();
+  } else {
+    taskSelectorWindow.show();
+    taskSelectorWindow.focus();
+  }
+  return true;
+});
+
+ipcMain.handle('window:close-task-selector', () => {
+  if (taskSelectorWindow) {
+    taskSelectorWindow.close();
+    taskSelectorWindow = null;
+  }
+  return true;
+});
+
+// Handler for task selection from the selector window
+ipcMain.on('task:selected', (_, task) => {
+  console.log('Task selected:', task);
+  
+  // Send the selected task to mini window and main window
+  if (miniWindow && !miniWindow.isDestroyed()) {
+    miniWindow.webContents.send('task:selected', task);
+  }
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('task:selected', task);
+  }
+  
+  // Close the task selector window
+  if (taskSelectorWindow) {
+    taskSelectorWindow.close();
+    taskSelectorWindow = null;
+  }
 });
 
 // Timer utility functions

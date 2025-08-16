@@ -57,6 +57,11 @@ const electronAPI = {
     setAutoSwitchCondition: (onlyWhenRunning) => ipcRenderer.invoke('window:set-auto-switch-condition', onlyWhenRunning),
     toggleMiniAlwaysOnTop: () => ipcRenderer.invoke('window:toggle-mini-always-on-top'),
     getMiniAlwaysOnTopState: () => ipcRenderer.invoke('window:get-mini-always-on-top-state'),
+    expandMiniForDropdown: () => ipcRenderer.invoke('window:expand-mini-for-dropdown'),
+    collapseMiniFromDropdown: () => ipcRenderer.invoke('window:collapse-mini-from-dropdown'),
+    forceCollapseMini: () => ipcRenderer.invoke('window:force-collapse-mini'),
+    openTaskSelector: () => ipcRenderer.invoke('window:open-task-selector'),
+    closeTaskSelector: () => ipcRenderer.invoke('window:close-task-selector'),
   },
   timer: {
     onStateSync: (callback) => ipcRenderer.on('timer:state-sync', callback),
@@ -70,7 +75,9 @@ const electronAPI = {
     adjustTime: (adjustment) => ipcRenderer.invoke('timer:adjust-time', adjustment),
     removeAllListeners: (channel) => {
       ipcRenderer.removeAllListeners(channel);
-    }
+    },
+    selectTask: (task) => ipcRenderer.send('task:selected', task),
+    onTaskSelected: (callback) => ipcRenderer.on('task:selected', callback),
   },
   showSaveDialog: (options) => ipcRenderer.invoke('showSaveDialog', options),
   writeFile: (filePath, content) => ipcRenderer.invoke('writeFile', filePath, content),

@@ -13,6 +13,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { MiniWindow } from "@/components/MiniWindow";
+import { TaskSelector } from "@/components/TaskSelector";
 import { Button } from "@/components/ui/button";
 import { Minimize2 } from "lucide-react";
 import Index from "./pages/Index";
@@ -26,7 +27,7 @@ const queryClient = new QueryClient();
 
 const App = () => {
   const [isFullScreen, setIsFullScreen] = useState(false);
-  const [windowMode, setWindowMode] = useState<'full' | 'mini' | 'tray'>('full');
+  const [windowMode, setWindowMode] = useState<'full' | 'mini' | 'tray' | 'taskSelector'>('full');
 
   useEffect(() => {
     const handleFullScreenChange = () => {
@@ -40,10 +41,12 @@ const App = () => {
   // Detect window mode from URL params
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
-    const mode = urlParams.get('mode') as 'full' | 'mini' | null;
+    const mode = urlParams.get('mode') as 'full' | 'mini' | 'taskSelector' | null;
     
     if (mode === 'mini') {
       setWindowMode('mini');
+    } else if (mode === 'taskSelector') {
+      setWindowMode('taskSelector');
     } else {
       setWindowMode('full');
     }
@@ -66,13 +69,50 @@ const App = () => {
           enableSystem
           disableTransitionOnChange
         >
-          <TooltipProvider>
-            <Toaster />
-            <Sonner />
-            <TimerProvider>
-              <MiniWindow />
-            </TimerProvider>
-          </TooltipProvider>
+          <QueryClientProvider client={queryClient}>
+            <AuthProvider>
+              <TooltipProvider>
+                <Toaster />
+                <Sonner />
+                <TimerProvider>
+                  <MiniWindow />
+                </TimerProvider>
+              </TooltipProvider>
+            </AuthProvider>
+          </QueryClientProvider>
+        </ThemeProvider>
+      </ErrorBoundary>
+    );
+  }
+
+  // If in task selector mode, render task selector
+  if (windowMode === 'taskSelector') {
+    return (
+      <ErrorBoundary>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
+          <QueryClientProvider client={queryClient}>
+            <AuthProvider>
+              <TooltipProvider>
+                <Toaster />
+                <Sonner />
+                <TaskSelector
+                  onTaskSelect={(task) => {
+                    // Send selected task to main process
+                    (window as any).electronAPI?.timer.selectTask(task);
+                  }}
+                  onCancel={() => {
+                    // Close the task selector window
+                    (window as any).electronAPI?.window.closeTaskSelector();
+                  }}
+                />
+              </TooltipProvider>
+            </AuthProvider>
+          </QueryClientProvider>
         </ThemeProvider>
       </ErrorBoundary>
     );

@@ -12,18 +12,15 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTimer, TaskRef } from "@/features/tracker/TimerContext";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-  SelectSeparator,
-} from "@/components/ui/select";
+import { useAuth } from "@/contexts/AuthContext";
+// Remove Select imports - using task selector window instead
 
 export const MiniWindow: React.FC = () => {
   const { status, task, activeMs, start, pause, resume, stop, sessions, setTask } = useTimer();
+  const { user } = useAuth();
   const [isAlwaysOnTop, setIsAlwaysOnTop] = useState(true);
+
+  // Debug logs removed - task selector working
 
   useEffect(() => {
     console.log('Getting initial always on top state');
@@ -31,7 +28,20 @@ export const MiniWindow: React.FC = () => {
       console.log('Initial always on top state:', state);
       setIsAlwaysOnTop(state);
     });
-  }, []);
+
+    // Listen for task selection from task selector window
+    const handleTaskSelected = (_event: any, selectedTask: TaskRef) => {
+      console.log('Task selected in mini window:', selectedTask);
+      setTask(selectedTask);
+    };
+
+    (window as any).electronAPI?.timer.onTaskSelected(handleTaskSelected);
+
+    // Cleanup
+    return () => {
+      (window as any).electronAPI?.timer.removeAllListeners('task:selected');
+    };
+  }, [setTask]);
 
   const handleToggleAlwaysOnTop = async () => {
     console.log('Toggling always on top');
@@ -40,19 +50,12 @@ export const MiniWindow: React.FC = () => {
     setIsAlwaysOnTop(newState);
   };
 
-  const recentTasks = useMemo(() => {
-    const uniqueTasks = sessions.reduce((acc, session) => {
-      // Safely handle task data
-      if (session.task && session.task.client && session.task.project && session.task.task) {
-        const taskKey = `${session.task.client}-${session.task.project}-${session.task.task}`;
-        if (!acc.find((t) => `${t.client}-${t.project}-${t.task}` === taskKey)) {
-          acc.push(session.task);
-        }
-      }
-      return acc;
-    }, [] as TaskRef[]);
-    return uniqueTasks.slice(0, 2);
-  }, [sessions]);
+  const openTaskSelector = async () => {
+    console.log('Opening task selector');
+    await (window as any).electronAPI?.window.openTaskSelector();
+  };
+
+  // Remove recent tasks logic - using task selector window instead
 
   const formatTime = (ms: number) => {
     const totalSeconds = Math.floor(ms / 1000);
@@ -87,32 +90,19 @@ export const MiniWindow: React.FC = () => {
         <GripVertical className="h-4 w-4 text-muted-foreground/70" />
       </div>
 
-      <Select
-        onValueChange={(value) => {
-          const selectedTask = recentTasks.find((t) => `${t.client}-${t.project}-${t.task}` === value);
-          if (selectedTask) setTask(selectedTask);
-        }}
-        value={task ? `${task.client}-${task.project}-${task.task}` : undefined}
+      <Button
+        variant="ghost"
+        onClick={openTaskSelector}
+        className="flex-1 min-w-32 max-w-48 h-7 text-xs border-0 bg-muted/50 px-2 justify-start truncate"
       >
-        <SelectTrigger className="flex-1 w-32 truncate h-7 text-xs border-0 bg-muted/50 px-2">
-          <SelectValue placeholder="Select task..." />
-        </SelectTrigger>
-        <SelectContent>
-          {recentTasks.map((t) => (
-            <SelectItem
-              key={`${t.client}-${t.project}-${t.task}`}
-              value={`${t.client}-${t.project}-${t.task}`}
-              className="text-xs"
-            >
-              <span className="truncate">{getTaskDisplay(t)}</span>
-            </SelectItem>
-          ))}
-          <SelectSeparator />
-          <div className="px-2 py-1.5 text-xs text-muted-foreground">
-            Expand window for more tasks
-          </div>
-        </SelectContent>
-      </Select>
+        {task ? (
+          <span className="truncate" title={getTaskDisplay(task)}>
+            {getTaskDisplay(task)}
+          </span>
+        ) : (
+          <span className="text-muted-foreground">Select task...</span>
+        )}
+      </Button>
 
       <div className="flex items-center gap-0.5 font-mono text-sm font-semibold text-primary min-w-[60px]">
         <Clock className="h-3 w-3" />
