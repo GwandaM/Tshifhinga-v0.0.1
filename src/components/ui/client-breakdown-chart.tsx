@@ -6,6 +6,8 @@ import type { SessionRecord } from "@/features/tracker/TimerContext";
 interface ClientBreakdownChartProps {
   sessions: SessionRecord[];
   className?: string;
+  onClientClick?: (clientName: string) => void;
+  selectedClient?: string | null;
 }
 
 interface ChartData {
@@ -59,7 +61,9 @@ const CustomTooltip = ({ active, payload }: any) => {
 
 export const ClientBreakdownChart: React.FC<ClientBreakdownChartProps> = ({
   sessions,
-  className
+  className,
+  onClientClick,
+  selectedClient
 }) => {
   // Calculate client breakdown (billable time only)
   const clientTotals = sessions.reduce((acc, session) => {
@@ -98,12 +102,23 @@ export const ClientBreakdownChart: React.FC<ClientBreakdownChartProps> = ({
     );
   }
 
+  const handleClientClick = (data: any) => {
+    if (onClientClick) {
+      onClientClick(data.name);
+    }
+  };
+
   return (
     <Card className={className}>
       <CardHeader>
         <CardTitle>Client Breakdown (Billable Only)</CardTitle>
         <p className="text-sm text-muted-foreground">
           Billable time distribution across {chartData.length} client{chartData.length !== 1 ? 's' : ''}
+          {selectedClient && (
+            <span className="block mt-1 text-blue-600 font-medium">
+              Selected: {selectedClient} (click to deselect)
+            </span>
+          )}
         </p>
       </CardHeader>
       <CardContent>
@@ -118,15 +133,31 @@ export const ClientBreakdownChart: React.FC<ClientBreakdownChartProps> = ({
                 outerRadius={100}
                 paddingAngle={2}
                 dataKey="value"
+                onClick={handleClientClick}
+                style={{ cursor: 'pointer' }}
               >
                 {chartData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.color} />
+                  <Cell 
+                    key={`cell-${index}`} 
+                    fill={entry.color}
+                    stroke={selectedClient === entry.name ? "#000" : "none"}
+                    strokeWidth={selectedClient === entry.name ? 2 : 0}
+                    style={{ 
+                      opacity: selectedClient && selectedClient !== entry.name ? 0.6 : 1,
+                      cursor: 'pointer'
+                    }}
+                  />
                 ))}
               </Pie>
               <Tooltip content={<CustomTooltip />} />
               <Legend 
                 formatter={(value, entry: any) => (
-                  <span className="text-sm">
+                  <span 
+                    className={`text-sm cursor-pointer hover:underline ${
+                      selectedClient === value ? 'font-bold text-blue-600' : ''
+                    }`}
+                    onClick={() => handleClientClick({ name: value })}
+                  >
                     {value} ({entry.payload.hours})
                   </span>
                 )}
@@ -134,6 +165,11 @@ export const ClientBreakdownChart: React.FC<ClientBreakdownChartProps> = ({
             </PieChart>
           </ResponsiveContainer>
         </div>
+        {onClientClick && (
+          <div className="text-xs text-muted-foreground mt-2 text-center">
+            Click on a client segment to see project breakdown
+          </div>
+        )}
       </CardContent>
     </Card>
   );

@@ -4,6 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { DateRangeControls, type DateRange, type Preset } from "@/features/tracker/components/DateRangeControls";
 import { MetricCard } from "@/components/ui/metric-card";
 import { ClientBreakdownChart } from "@/components/ui/client-breakdown-chart";
+import { ProjectBreakdownChart } from "@/components/ui/project-breakdown-chart";
 import { ExportPanel } from "@/components/ui/export-panel";
 import { RecentSessionsTable } from "@/components/ui/recent-sessions-table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -43,6 +44,7 @@ function Reports() {
   const [selectedClient, setSelectedClient] = useState<string>("all");
   const [selectedProject, setSelectedProject] = useState<string>("all");
   const [viewMode, setViewMode] = useState<"overview" | "detailed" | "trends">("overview");
+  const [selectedClientForDrilldown, setSelectedClientForDrilldown] = useState<string | null>(null);
 
   // Manual refresh function
   const handleManualRefresh = useCallback(async () => {
@@ -75,6 +77,16 @@ function Reports() {
   useEffect(() => {
     handleManualRefresh();
   }, [handleManualRefresh]);
+
+  // Handle client selection for drilldown
+  const handleClientClick = useCallback((clientName: string) => {
+    if (selectedClientForDrilldown === clientName) {
+      // Deselect if clicking the same client
+      setSelectedClientForDrilldown(null);
+    } else {
+      setSelectedClientForDrilldown(clientName);
+    }
+  }, [selectedClientForDrilldown]);
 
   const { from, to } = useMemo(() => {
     if (preset === "today") {
@@ -446,17 +458,16 @@ function Reports() {
 
         {/* View Mode Content */}
         {viewMode === "overview" && (
-          <div className="grid gap-6 lg:grid-cols-5 mb-8">
-            <div className="lg:col-span-3">
-              <ClientBreakdownChart sessions={filtered} />
-            </div>
-            <div className="lg:col-span-2">
-              <ExportPanel 
-                sessions={sessions}
-                filteredSessions={filtered}
-                dateRange={dateRangeInfo}
-              />
-            </div>
+          <div className="grid gap-6 lg:grid-cols-2 mb-8">
+            <ClientBreakdownChart 
+              sessions={filtered} 
+              onClientClick={handleClientClick}
+              selectedClient={selectedClientForDrilldown}
+            />
+            <ProjectBreakdownChart 
+              sessions={filtered}
+              selectedClient={selectedClientForDrilldown}
+            />
           </div>
         )}
 
