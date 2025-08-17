@@ -675,14 +675,14 @@ class DatabaseService {
 
     // Seed job levels
     const jobLevels = [
-      { code: 'JA', name: 'Junior Associate', level_order: 1 },
-      { code: 'A', name: 'Associate', level_order: 2 },
-      { code: 'SA', name: 'Senior Associate', level_order: 3 },
+      { code: 'JA', name: 'Junior Analyst', level_order: 1 },
+      { code: 'A', name: 'Analyst', level_order: 2 },
+      { code: 'SA', name: 'Senior Analyst', level_order: 3 },
       { code: 'AM', name: 'Assistant Manager', level_order: 4 },
       { code: 'M', name: 'Manager', level_order: 5 },
       { code: 'SM', name: 'Senior Manager', level_order: 6 },
-      { code: 'AD', name: 'Associate Director', level_order: 7 },
-      { code: 'SAD', name: 'Senior Associate Director', level_order: 8 },
+      { code: 'AD', name: 'Analyst Director', level_order: 7 },
+      { code: 'SAD', name: 'Senior Analyst Director', level_order: 8 },
       { code: 'D', name: 'Director', level_order: 9 },
       { code: 'P', name: 'Partner', level_order: 10 }
     ];
