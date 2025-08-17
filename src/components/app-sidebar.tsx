@@ -1,5 +1,5 @@
 import { NavLink, useLocation } from "react-router-dom";
-import { Clock, CalendarDays, BarChart3, Menu, Users, Shield, Activity } from "lucide-react";
+import { Clock, CalendarDays, BarChart3, Menu, Users, Shield, Activity, LayoutDashboard, DollarSign, TrendingUp } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -17,9 +17,15 @@ import { UserMenu } from "@/components/auth/UserMenu";
 import { useAuth } from "@/contexts/AuthContext";
 
 const items = [
-  { title: "Dashboard", url: "/", icon: Clock },
+  { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
+  { title: "Timer", url: "/", icon: Clock },
   { title: "Calendar", url: "/calendar", icon: CalendarDays },
   { title: "Reports", url: "/reports", icon: BarChart3 },
+];
+
+const analyticsItems = [
+  { title: "Financial", url: "/analytics/financial", icon: DollarSign },
+  { title: "Team Performance", url: "/analytics/team", icon: TrendingUp, permission: "view_all_sessions" },
 ];
 
 const adminItems = [
@@ -40,6 +46,10 @@ export function AppSidebar() {
 
   const visibleAdminItems = adminItems.filter(item => 
     hasPermission(item.permission) // Check specific permission for each item
+  );
+
+  const visibleAnalyticsItems = analyticsItems.filter(item => 
+    !item.permission || hasPermission(item.permission)
   );
 
   return (
@@ -73,6 +83,29 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        {/* Analytics Section */}
+        {visibleAnalyticsItems.length > 0 && (
+          <SidebarGroup>
+            <div className="flex items-center justify-between mb-2 px-2">
+              {!collapsed && <SidebarGroupLabel className="text-xs">Analytics</SidebarGroupLabel>}
+            </div>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {visibleAnalyticsItems.map((item) => (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton asChild tooltip={item.title}>
+                      <NavLink to={item.url} end className={getNavCls}>
+                        <item.icon />
+                        {!collapsed && <span>{item.title}</span>}
+                      </NavLink>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
 
         {/* Admin Section */}
         {visibleAdminItems.length > 0 && (
