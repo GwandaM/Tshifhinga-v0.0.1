@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { useTimer } from "@/features/tracker/TimerContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { useQuery } from "@tanstack/react-query";
 import { DateRangeControls, type DateRange, type Preset } from "@/features/tracker/components/DateRangeControls";
 import { MetricCard } from "@/components/ui/metric-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -35,6 +36,23 @@ import {
   Scatter
 } from "recharts";
 import type { SessionRecord } from "@/features/tracker/TimerContext";
+
+interface UserData {
+  id: number;
+  username: string;
+  email: string;
+  role: 'admin' | 'user';
+  isActive: boolean;
+  createdAt: number;
+  name?: string;
+  surname?: string;
+  team?: string;
+  region?: string;
+  jobLevel?: string;
+  billableRate?: number;
+  discountPercentage?: number;
+  targetUtilization?: number;
+}
 
 interface TeamMember {
   id: number;
@@ -71,7 +89,16 @@ interface TeamMetrics {
 
 function TeamAnalytics() {
   const { sessions, refreshSessions } = useTimer();
-  const { user, users } = useAuth();
+  const { user } = useAuth();
+  
+  // Fetch users data using React Query
+  const { data: users = [], isLoading: usersLoading, error: usersError } = useQuery({
+    queryKey: ['users'],
+    queryFn: async () => {
+      const response = await window.electronAPI.auth.getAllUsers();
+      return response as UserData[];
+    },
+  });
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   
@@ -338,6 +365,39 @@ function TeamAnalytics() {
           <p className="text-muted-foreground">
             You need admin or director permissions to view team analytics.
           </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Loading state for users
+  if (usersLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <Activity className="h-12 w-12 text-muted-foreground mx-auto mb-4 animate-spin" />
+          <h2 className="text-2xl font-bold mb-2">Loading Team Data</h2>
+          <p className="text-muted-foreground">
+            Fetching team member information...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state for users
+  if (usersError) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+          <h2 className="text-2xl font-bold mb-2">Error Loading Team Data</h2>
+          <p className="text-muted-foreground mb-4">
+            Failed to load team member information.
+          </p>
+          <Button onClick={() => window.location.reload()}>
+            Retry
+          </Button>
         </div>
       </div>
     );
