@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
+import { VisuallyHidden } from '../ui/visually-hidden';
 import { LoginForm } from './LoginForm';
 import { RegisterForm } from './RegisterForm';
 
@@ -23,9 +24,11 @@ export function AuthDialog({ open, onOpenChange, defaultTab = 'login' }: AuthDia
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle className="sr-only">
-            {activeTab === 'login' ? 'Sign In' : 'Create Account'}
-          </DialogTitle>
+          <VisuallyHidden>
+            <DialogTitle>
+              {activeTab === 'login' ? 'Sign In' : 'Create Account'}
+            </DialogTitle>
+          </VisuallyHidden>
         </DialogHeader>
         
         {activeTab === 'login' ? (

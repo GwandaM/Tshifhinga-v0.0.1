@@ -3,6 +3,8 @@ const { join: pathJoin } = require('path');
 const { writeFile } = require('fs').promises;
 const { DatabaseService } = require('./database');
 const { AuthService } = require('./auth-service');
+// const { LoggerService } = require('./logger-service');
+const { ConfigService } = require('./config-service');
 const isDev = require('electron-is-dev');
 
 // Set app name early to ensure proper userData path
@@ -11,19 +13,36 @@ electronApp.setName('tshifhinga-time-tracker');
 // Keep a global reference of the database service and windows
 let dbService: any;
 let authService: any;
+// let logger: any;
+let config: any;
 let mainWindow: any | null = null;
 let miniWindow: any | null = null;
 let taskSelectorWindow: any | null = null;
 let tray: any | null = null;
 let systemSleepTime: number | null = null;
-let currentTimerState: any = {
+
+// Timer state management with proper cleanup
+interface TimerState {
+  status: 'stopped' | 'running' | 'paused';
+  activeMs: number;
+  pausedMs: number;
+  startTs: number | null;
+  lastUpdateTs: number | null;
+  task: any;
+}
+
+let currentTimerState: TimerState = {
   status: 'stopped',
   activeMs: 0,
   pausedMs: 0,
   startTs: null,
+  lastUpdateTs: null,
   task: null
 };
+
 let timerInterval: NodeJS.Timeout | null = null;
+let timerCleanupTimeout: NodeJS.Timeout | null = null;
+let stateValidationInterval: NodeJS.Timeout | null = null;
 
 // Window state management
 let windowState = {
@@ -361,19 +380,69 @@ const switchToTray = (): void => {
 
 // App event listeners
 electronApp.whenReady().then(async () => {
-  // Initialize database
-  dbService = new DatabaseService();
-  await dbService.init();
-  
-  // Initialize auth service
-  authService = new AuthService();
-  await authService.init();
-  
-  // Create main window initially
-  createMainWindow();
-  
-  // Create tray immediately
-  createTray();
+  try {
+    // Initialize services with proper error handling
+    // logger = LoggerService.getInstance();
+    config = ConfigService.getInstance();
+    
+    console.log('Application starting');
+    
+    // Validate configuration
+    const configValidation = config.validateConfig();
+    if (!configValidation.isValid) {
+      console.error('Configuration validation failed:', {
+        errors: configValidation.errors
+      });
+      throw new Error(`Configuration invalid: ${configValidation.errors.join(', ')}`);
+    }
+    
+    // Initialize database
+    dbService = new DatabaseService();
+    await dbService.init();
+    console.log('Database service initialized');
+    
+    // Create analytics tables and views for performance optimization
+    try {
+      await dbService.createAnalyticsTables();
+      console.log('Analytics tables created successfully');
+      
+      // Populate analytics summary tables if they're empty
+      await dbService.populateAnalyticsSummaries();
+      console.log('Analytics summary tables populated');
+    } catch (analyticsError) {
+      console.error('Analytics setup failed:', analyticsError);
+      // Don't fail the app startup, but log the error
+    }
+    
+    // Initialize auth service
+    authService = new AuthService();
+    await authService.init();
+    console.log('Auth service initialized');
+    
+    // Check if we need to promote the first user to admin
+    const allUsers = await authService.getAllUsers();
+    const adminUsers = allUsers.filter(user => user.role === 'admin');
+    if (adminUsers.length === 0 && allUsers.length > 0) {
+      console.log('No admin users found, promoting first user to admin...');
+      await authService.promoteFirstUserToAdmin();
+    }
+    
+    // Create main window initially
+    createMainWindow();
+    
+    // Create tray immediately
+    createTray();
+    
+    // Start timer state validation
+    startTimerStateValidation();
+    
+    console.log('Application initialized successfully');
+    
+  } catch (error) {
+    console.error('Application initialization failed:', error);
+    console.error('Critical error during app initialization:', error);
+    electronApp.quit();
+  }
 
   // Set up power monitor events for system sleep/wake detection
   powerMonitor.on('suspend', () => {
@@ -433,12 +502,33 @@ electronApp.on('window-all-closed', () => {
 });
 
 electronApp.on('before-quit', async () => {
-  // Clean up database and auth service connections
-  if (authService) {
-    await authService.close();
-  }
-  if (dbService) {
-    await dbService.close();
+  console.log('Application shutting down', 'MAIN');
+  
+  try {
+    // Clean up timer intervals
+    stopTimerInterval();
+    stopTimerStateValidation();
+    
+    // Clean up database and auth service connections
+    if (authService) {
+      await authService.close();
+      console.log('Auth service closed', 'MAIN');
+    }
+    
+    if (dbService) {
+      await dbService.close();
+      console.log('Database service closed', 'MAIN');
+    }
+    
+    // Clean up logs if needed
+    // if (logger) {
+    //   await logger.cleanupOldLogs();
+    //   logger.info('Application shutdown complete', 'MAIN');
+    // }
+    console.log('Application shutdown complete');
+    
+  } catch (error) {
+    console.error('Error during application shutdown:', error);
   }
 });
 
@@ -622,42 +712,140 @@ ipcMain.on('task:selected', (_, task) => {
   }
 });
 
-// Timer utility functions
-const broadcastTimerState = () => {
-  if (mainWindow) {
-    mainWindow.webContents.send('timer:state-sync', currentTimerState);
-  }
-  if (miniWindow) {
-    miniWindow.webContents.send('timer:state-sync', currentTimerState);
-  }
-  
-  // Update tray tooltip with timer info
-  if (tray && !tray.isDestroyed()) {
+// Timer state validation and cleanup
+const startTimerStateValidation = () => {
+  stateValidationInterval = setInterval(() => {
     try {
-      if (currentTimerState.status === 'running' && currentTimerState.activeMs) {
-        const minutes = Math.floor(currentTimerState.activeMs / 60000);
-        const seconds = Math.floor((currentTimerState.activeMs % 60000) / 1000);
-        const timeStr = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-        tray.setToolTip(`Tshifhinga - ${timeStr} - ${currentTimerState.task?.client || 'No task'}`);
-      } else {
-        tray.setToolTip('Tshifhinga Time Tracker');
+      // Check for state inconsistencies
+      if (currentTimerState.status === 'running' && !timerInterval) {
+        console.warn('Timer state shows running but no interval active - fixing', 'TIMER');
+        startTimerInterval();
+      } else if (currentTimerState.status !== 'running' && timerInterval) {
+        console.warn('Timer interval active but state not running - fixing', 'TIMER');
+        stopTimerInterval();
+      }
+      
+      // Check for runaway timers (more than 24 hours)
+      if (currentTimerState.activeMs > 24 * 60 * 60 * 1000) {
+        console.warn('Timer has been running for more than 24 hours - auto-stopping', 'TIMER', {
+          activeMs: currentTimerState.activeMs
+        });
+        stopTimerInterval();
+        currentTimerState.status = 'stopped';
+        broadcastTimerState();
       }
     } catch (error) {
-      console.error('Error updating tray tooltip:', error);
+      console.error('Error in timer state validation', 'TIMER', error as Error);
     }
+  }, 30000); // Check every 30 seconds
+};
+
+const stopTimerStateValidation = () => {
+  if (stateValidationInterval) {
+    clearInterval(stateValidationInterval);
+    stateValidationInterval = null;
+  }
+};
+
+// Timer utility functions
+const broadcastTimerState = () => {
+  try {
+    // Sanitize state before broadcasting
+    const safeState = {
+      status: currentTimerState.status,
+      activeMs: Math.max(0, currentTimerState.activeMs || 0),
+      pausedMs: Math.max(0, currentTimerState.pausedMs || 0),
+      startTs: currentTimerState.startTs,
+      task: currentTimerState.task
+    };
+    
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('timer:state-sync', safeState);
+    }
+    if (miniWindow && !miniWindow.isDestroyed()) {
+      miniWindow.webContents.send('timer:state-sync', safeState);
+    }
+    
+    // Update tray tooltip with timer info
+    updateTrayTooltip(safeState);
+  } catch (error) {
+    console.error('Error broadcasting timer state', 'TIMER', error as Error);
+  }
+};
+
+const updateTrayTooltip = (state: any) => {
+  if (!tray || tray.isDestroyed()) return;
+  
+  try {
+    if (state.status === 'running' && state.activeMs > 0) {
+      const minutes = Math.floor(state.activeMs / 60000);
+      const seconds = Math.floor((state.activeMs % 60000) / 1000);
+      const timeStr = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+      const taskInfo = state.task?.client || 'No task';
+      tray.setToolTip(`Tshifhinga - ${timeStr} - ${taskInfo}`);
+    } else {
+      tray.setToolTip('Tshifhinga Time Tracker');
+    }
+  } catch (error) {
+    console.error('Error updating tray tooltip', 'TIMER', error as Error);
   }
 };
 
 const startTimerInterval = () => {
-  if (timerInterval) clearInterval(timerInterval);
+  // Clean up any existing intervals
+  stopTimerInterval();
+  
+  // Clear any pending cleanup
+  if (timerCleanupTimeout) {
+    clearTimeout(timerCleanupTimeout);
+    timerCleanupTimeout = null;
+  }
+  
+  currentTimerState.lastUpdateTs = Date.now();
+  
   timerInterval = setInterval(() => {
-    if (currentTimerState.status === 'running' && currentTimerState.startTs) {
-      const now = Date.now();
-      const elapsed = now - currentTimerState.startTs;
-      currentTimerState.activeMs += 1000; // Add 1 second
-      broadcastTimerState();
+    try {
+      if (currentTimerState.status === 'running' && currentTimerState.startTs) {
+        const now = Date.now();
+        const timeSinceLastUpdate = currentTimerState.lastUpdateTs ? now - currentTimerState.lastUpdateTs : 1000;
+        
+        // Prevent time drift by using actual elapsed time
+        const maxUpdateTime = 2000; // Max 2 seconds to prevent large jumps
+        const updateTime = Math.min(timeSinceLastUpdate, maxUpdateTime);
+        
+        currentTimerState.activeMs += updateTime;
+        currentTimerState.lastUpdateTs = now;
+        
+        broadcastTimerState();
+        
+        // Log performance warning for slow updates
+        if (timeSinceLastUpdate > 1500) {
+          console.warn('Timer update was slow', 'TIMER', { 
+            timeSinceLastUpdate,
+            activeMs: currentTimerState.activeMs 
+          });
+        }
+      } else {
+        // Auto-cleanup if timer is not in expected state
+        console.warn('Timer interval running but state is not running', 'TIMER', {
+          status: currentTimerState.status,
+          startTs: currentTimerState.startTs
+        });
+        stopTimerInterval();
+      }
+    } catch (error) {
+      console.error('Error in timer interval', 'TIMER', error as Error);
+      stopTimerInterval();
     }
   }, 1000);
+  
+  // Set up automatic cleanup after 24 hours (safety mechanism)
+  timerCleanupTimeout = setTimeout(() => {
+    console.warn('Timer auto-cleanup after 24 hours', 'TIMER');
+    stopTimerInterval();
+    currentTimerState.status = 'stopped';
+    broadcastTimerState();
+  }, 24 * 60 * 60 * 1000);
 };
 
 const stopTimerInterval = () => {
@@ -665,43 +853,121 @@ const stopTimerInterval = () => {
     clearInterval(timerInterval);
     timerInterval = null;
   }
+  
+  if (timerCleanupTimeout) {
+    clearTimeout(timerCleanupTimeout);
+    timerCleanupTimeout = null;
+  }
+  
+  currentTimerState.lastUpdateTs = null;
 };
 
 // IPC handlers for timer actions
 ipcMain.on('timer:start', (_, task) => {
-  currentTimerState = {
-    ...currentTimerState,
-    status: 'running',
-    task,
-    startTs: Date.now(),
-  };
-  startTimerInterval();
-  broadcastTimerState();
+  try {
+    console.log('Timer start requested', 'TIMER', { task: task?.client });
+    
+    // Validate task data
+    if (!task || !task.client || !task.project || !task.task) {
+      console.error('Invalid task data for timer start', 'TIMER', undefined, { task });
+      return;
+    }
+    
+    // Stop any existing timer
+    stopTimerInterval();
+    
+    currentTimerState = {
+      status: 'running',
+      activeMs: 0,
+      pausedMs: 0,
+      startTs: Date.now(),
+      lastUpdateTs: Date.now(),
+      task: {
+        client: String(task.client || '').trim(),
+        project: String(task.project || '').trim(),
+        task: String(task.task || '').trim()
+      }
+    };
+    
+    startTimerInterval();
+    broadcastTimerState();
+    
+    console.log('Timer started successfully', 'TIMER', {
+      client: currentTimerState.task.client,
+      project: currentTimerState.task.project,
+      task: currentTimerState.task.task
+    });
+  } catch (error) {
+    console.error('Error starting timer', 'TIMER', error as Error);
+  }
 });
 
 ipcMain.on('timer:pause', () => {
-  if (currentTimerState.status === 'running') {
-    currentTimerState.status = 'paused';
-    stopTimerInterval();
-    broadcastTimerState();
+  try {
+    if (currentTimerState.status === 'running') {
+      console.log('Timer paused', 'TIMER', { activeMs: currentTimerState.activeMs });
+      currentTimerState.status = 'paused';
+      stopTimerInterval();
+      broadcastTimerState();
+    } else {
+      console.warn('Timer pause requested but timer not running', 'TIMER', {
+        status: currentTimerState.status
+      });
+    }
+  } catch (error) {
+    console.error('Error pausing timer', 'TIMER', error as Error);
   }
 });
 
 ipcMain.on('timer:resume', () => {
-  if (currentTimerState.status === 'paused') {
-    currentTimerState = {
-      ...currentTimerState,
-      status: 'running',
-      startTs: Date.now(),
-    };
-    startTimerInterval();
-    broadcastTimerState();
+  try {
+    if (currentTimerState.status === 'paused') {
+      console.log('Timer resumed', 'TIMER', { activeMs: currentTimerState.activeMs });
+      currentTimerState = {
+        ...currentTimerState,
+        status: 'running',
+        startTs: Date.now(),
+        lastUpdateTs: Date.now()
+      };
+      startTimerInterval();
+      broadcastTimerState();
+    } else {
+      console.warn('Timer resume requested but timer not paused', 'TIMER', {
+        status: currentTimerState.status
+      });
+    }
+  } catch (error) {
+    console.error('Error resuming timer', 'TIMER', error as Error);
   }
 });
 
 ipcMain.on('timer:stop', async (_, data) => {
-  if (currentTimerState.status !== 'stopped' && currentTimerState.task) {
+  const stopTime = Date.now();
+  
+  try {
+    if (currentTimerState.status === 'stopped') {
+      console.warn('Timer stop requested but timer already stopped', 'TIMER');
+      return;
+    }
+    
+    if (!currentTimerState.task) {
+      console.error('Timer stop requested but no task set', 'TIMER');
+      stopTimerInterval();
+      currentTimerState.status = 'stopped';
+      broadcastTimerState();
+      return;
+    }
+    
     const { notes, token } = data || {};
+    
+    console.log('Timer stop requested', 'TIMER', {
+      activeMs: currentTimerState.activeMs,
+      pausedMs: currentTimerState.pausedMs,
+      hasNotes: !!notes
+    });
+    
+    // Stop the timer interval first
+    stopTimerInterval();
     
     // Get user ID from token
     let userId = null;
@@ -712,51 +978,72 @@ ipcMain.on('timer:stop', async (_, data) => {
           userId = user.id;
         }
       } catch (error) {
-        console.error('Error verifying token:', error);
+        console.error('Error verifying token for session save', 'TIMER', error as Error);
       }
     }
 
+    // Ensure minimum session duration (at least 1 second)
+    const finalActiveMs = Math.max(currentTimerState.activeMs, 1000);
+    
     // Save session to database
+    const sessionId = `session-${stopTime}-${Math.random().toString(36).substring(2, 15)}`;
     const session = {
-      id: `session-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`,
+      id: sessionId,
       client: currentTimerState.task.client,
       project: currentTimerState.task.project,
       task: currentTimerState.task.task,
-      start: currentTimerState.startTs || Date.now(),
-      end: Date.now(),
-      activeMs: currentTimerState.activeMs,
+      start: currentTimerState.startTs || (stopTime - finalActiveMs),
+      end: stopTime,
+      activeMs: finalActiveMs,
       pausedMs: currentTimerState.pausedMs || 0,
       notes: notes || null,
-      createdAt: Date.now(),
+      createdAt: stopTime,
       isBillable: true,
       userId: userId,
     };
 
     try {
       await dbService.insertSession(session);
-      console.log('Session saved to database');
+      console.log('Session saved to database', 'TIMER', {
+        sessionId,
+        activeMs: finalActiveMs,
+        userId
+      });
       
       // Notify renderer to refresh sessions
-      if (mainWindow) {
+      if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('timer-action-refresh-sessions');
       }
-      if (miniWindow) {
+      if (miniWindow && !miniWindow.isDestroyed()) {
         miniWindow.webContents.send('timer-action-refresh-sessions');
       }
     } catch (error) {
-      console.error('Error saving session:', error);
+      console.error('Error saving session to database', 'TIMER', error as Error, {
+        sessionId,
+        activeMs: finalActiveMs
+      });
     }
+    
+    // Reset timer state
+    currentTimerState = {
+      status: 'stopped',
+      activeMs: 0,
+      pausedMs: 0,
+      startTs: null,
+      lastUpdateTs: null,
+      task: null
+    };
+    
+    broadcastTimerState();
+    
+  } catch (error) {
+    console.error('Error stopping timer', 'TIMER', error as Error);
+    
+    // Ensure timer is stopped even if there's an error
+    stopTimerInterval();
+    currentTimerState.status = 'stopped';
+    broadcastTimerState();
   }
-
-  currentTimerState = {
-    status: 'stopped',
-    activeMs: 0,
-    pausedMs: 0,
-    startTs: null,
-    task: currentTimerState.task, // Keep task selected
-  };
-  stopTimerInterval();
-  broadcastTimerState();
 });
 
 ipcMain.on('timer:set-task', (_, task) => {
@@ -901,6 +1188,23 @@ ipcMain.handle('db:createRegion', async (_, name) => {
 });
 ipcMain.handle('db:createJobLevel', async (_, name, defaultRate) => {
   return await dbService.createJobLevel(name, defaultRate);
+});
+
+// Analytics aggregation handlers
+ipcMain.handle('db:getUserDailyMetrics', async (_, userId, dateFrom, dateTo) => {
+  return await dbService.getUserDailyMetrics(userId, dateFrom, dateTo);
+});
+ipcMain.handle('db:getClientProfitability', async (_, userId) => {
+  return await dbService.getClientProfitability(userId);
+});
+ipcMain.handle('db:getTeamPerformance', async (_, dateFrom, dateTo, team, region) => {
+  return await dbService.getTeamPerformance(dateFrom, dateTo, team, region);
+});
+ipcMain.handle('db:getMonthlyTrends', async (_, userId, monthsBack) => {
+  return await dbService.getMonthlyTrends(userId, monthsBack);
+});
+ipcMain.handle('db:populateAnalyticsSummaries', async () => {
+  return await dbService.populateAnalyticsSummaries();
 });
 
 // File save dialog handler

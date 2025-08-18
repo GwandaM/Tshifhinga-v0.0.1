@@ -1,5 +1,6 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { randomBytes } = require('crypto');
 const { DatabaseService } = require('./database');
 
 interface AuthUser {
@@ -32,11 +33,16 @@ interface RegisterResponse {
 
 class AuthService {
   private db: any;
-  private jwtSecret: string = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+  private jwtSecret: string;
   private tokenExpiry: string = '24h';
 
   constructor() {
     this.db = new DatabaseService();
+    this.jwtSecret = process.env.JWT_SECRET || this.generateSecureSecret();
+  }
+
+  private generateSecureSecret(): string {
+    return randomBytes(64).toString('hex');
   }
 
   async init(): Promise<void> {
@@ -46,18 +52,15 @@ class AuthService {
 
   private async createDefaultAdmin(): Promise<void> {
     try {
-      // Check if admin already exists
-      const existingAdmin = await this.db.getUserByUsername('admin');
-      if (existingAdmin) {
-        return;
+      // Check if any admin exists
+      const allUsers = await this.db.getAllUsers();
+      const adminExists = allUsers.some(user => user.role === 'admin');
+      
+      if (!adminExists) {
+        console.log('No admin users found. Please register the first admin user through the UI.');
       }
-
-      // Create default admin user
-      const hashedPassword = await bcrypt.hash('admin123', 10);
-      await this.db.createUser('admin', 'admin@example.com', hashedPassword, 'admin');
-      console.log('Default admin user created: username=admin, password=admin123');
     } catch (error) {
-      console.error('Error creating default admin:', error);
+      console.error('Error checking for admin users:', error);
     }
   }
 
@@ -91,6 +94,13 @@ class AuthService {
       const existingUser = await this.db.getUserByUsername(username);
       if (existingUser) {
         return { success: false, error: 'Username already exists' };
+      }
+
+      // Check if this is the first user - if so, make them admin
+      const allUsers = await this.db.getAllUsers();
+      if (allUsers.length === 0) {
+        role = 'admin';
+        console.log(`Making first user '${username}' an admin`);
       }
 
       // Hash password and create user with enhanced data
@@ -304,6 +314,24 @@ class AuthService {
       return true;
     } catch (error) {
       console.error('Error updating user role:', error);
+      return false;
+    }
+  }
+
+  async promoteFirstUserToAdmin(): Promise<boolean> {
+    try {
+      const allUsers = await this.db.getAllUsers();
+      if (allUsers.length > 0) {
+        const firstUser = allUsers[0];
+        const success = await this.updateUserRole(firstUser.id, 'admin');
+        if (success) {
+          console.log(`Promoted user '${firstUser.username}' to admin`);
+        }
+        return success;
+      }
+      return false;
+    } catch (error) {
+      console.error('Error promoting first user to admin:', error);
       return false;
     }
   }

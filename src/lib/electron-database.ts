@@ -189,6 +189,42 @@ class ElectronDatabaseService {
     }
     return false;
   }
+
+  // Analytics aggregation methods
+  async getUserDailyMetrics(userId?: number, dateFrom?: Date, dateTo?: Date): Promise<any[]> {
+    if (!this.isElectron()) {
+      throw new Error('Not running in Electron environment');
+    }
+    return await window.electronAPI.database.getUserDailyMetrics(userId, dateFrom, dateTo);
+  }
+
+  async getClientProfitability(userId?: number): Promise<any[]> {
+    if (!this.isElectron()) {
+      throw new Error('Not running in Electron environment');
+    }
+    return await window.electronAPI.database.getClientProfitability(userId);
+  }
+
+  async getTeamPerformance(dateFrom?: Date, dateTo?: Date, team?: string, region?: string): Promise<any[]> {
+    if (!this.isElectron()) {
+      throw new Error('Not running in Electron environment');
+    }
+    return await window.electronAPI.database.getTeamPerformance(dateFrom, dateTo, team, region);
+  }
+
+  async getMonthlyTrends(userId?: number, monthsBack: number = 6): Promise<any[]> {
+    if (!this.isElectron()) {
+      throw new Error('Not running in Electron environment');
+    }
+    return await window.electronAPI.database.getMonthlyTrends(userId, monthsBack);
+  }
+
+  async populateAnalyticsSummaries(): Promise<void> {
+    if (!this.isElectron()) {
+      throw new Error('Not running in Electron environment');
+    }
+    return await window.electronAPI.database.populateAnalyticsSummaries();
+  }
 }
 
 // Export singleton instance

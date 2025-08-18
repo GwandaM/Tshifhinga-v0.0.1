@@ -42,6 +42,12 @@ const electronAPI = {
     createTeam: (name, description) => ipcRenderer.invoke('db:createTeam', name, description),
     createRegion: (name) => ipcRenderer.invoke('db:createRegion', name),
     createJobLevel: (name, defaultRate) => ipcRenderer.invoke('db:createJobLevel', name, defaultRate),
+    // Analytics aggregation methods
+    getUserDailyMetrics: (userId, dateFrom, dateTo) => ipcRenderer.invoke('db:getUserDailyMetrics', userId, dateFrom, dateTo),
+    getClientProfitability: (userId) => ipcRenderer.invoke('db:getClientProfitability', userId),
+    getTeamPerformance: (dateFrom, dateTo, team, region) => ipcRenderer.invoke('db:getTeamPerformance', dateFrom, dateTo, team, region),
+    getMonthlyTrends: (userId, monthsBack) => ipcRenderer.invoke('db:getMonthlyTrends', userId, monthsBack),
+    populateAnalyticsSummaries: () => ipcRenderer.invoke('db:populateAnalyticsSummaries'),
   },
   window: {
     switchToMini: () => ipcRenderer.invoke('window:switch-to-mini'),

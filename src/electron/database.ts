@@ -54,25 +54,23 @@ class DatabaseService {
 
   constructor() {
     try {
-      // Use project root directory instead of system app data directory
-      // Get the app directory (where the main.js is located)  
-      const appPath = electronApp.getAppPath();
-      console.log('App path:', appPath);
+      // Use secure application data directory
+      const userDataPath = electronApp.getPath('userData');
+      console.log('User data path:', userDataPath);
       
-      // Go up to project root (from dist-electron to project root)
-      const projectRoot = pathJoin(appPath, '..');
-      
-      // Create database in project root under 'data' folder
-      const dbDir = pathJoin(projectRoot, 'data');
+      // Create database in secure user data directory
+      const dbDir = pathJoin(userDataPath, 'data');
       console.log('Database directory:', dbDir);
       
-      // Ensure directory exists with proper permissions
+      // Ensure directory exists with secure permissions
       if (!existsSync(dbDir)) {
         console.log('Creating database directory...');
-        mkdirSync(dbDir, { recursive: true, mode: 0o755 });
+        mkdirSync(dbDir, { recursive: true, mode: 0o700 }); // Secure permissions - owner only
         console.log('Database directory created successfully');
       } else {
         console.log('Database directory already exists');
+        // Ensure existing directory has secure permissions
+        chmodSync(dbDir, 0o700);
       }
       
       this.dbPath = pathJoin(dbDir, 'sessions.db');
@@ -114,7 +112,7 @@ class DatabaseService {
               // Try to fix permissions and retry once
               try {
                 if (existsSync(this.dbPath)) {
-                  chmodSync(this.dbPath, 0o666);
+                  chmodSync(this.dbPath, 0o600);
                 }
                 console.log('Attempting to retry database connection with fixed permissions...');
                 connectWithRetry(true);
@@ -137,9 +135,9 @@ class DatabaseService {
           this.db = db;
           console.log(`Connected to SQLite database at: ${this.dbPath}${isRetry ? ' (after permission fix)' : ''}`);
           
-          // Ensure file has proper permissions
+          // Ensure file has secure permissions (owner read/write only)
           try {
-            chmodSync(this.dbPath, 0o666);
+            chmodSync(this.dbPath, 0o600);
           } catch (chmodErr) {
             console.warn('Could not set database file permissions:', chmodErr);
           }
@@ -2276,6 +2274,342 @@ class DatabaseService {
     });
   }
 
+  // Analytics aggregation methods using materialized views
+  async getUserDailyMetrics(userId?: number, dateFrom?: Date, dateTo?: Date): Promise<any[]> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      let sql = 'SELECT * FROM view_user_daily_metrics WHERE 1=1';
+      const params: any[] = [];
+
+      if (userId) {
+        sql += ' AND user_id = ?';
+        params.push(userId);
+      }
+
+      if (dateFrom) {
+        sql += ' AND date >= ?';
+        params.push(dateFrom.toISOString().split('T')[0]);
+      }
+
+      if (dateTo) {
+        sql += ' AND date <= ?';
+        params.push(dateTo.toISOString().split('T')[0]);
+      }
+
+      sql += ' ORDER BY date DESC, client';
+
+      this.db.all(sql, params, (err: any, rows: any[]) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(rows);
+        }
+      });
+    });
+  }
+
+  async getClientProfitability(userId?: number): Promise<any[]> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      let sql = 'SELECT * FROM view_client_profitability WHERE 1=1';
+      const params: any[] = [];
+
+      if (userId) {
+        sql += ' AND user_id = ?';
+        params.push(userId);
+      }
+
+      sql += ' ORDER BY revenue DESC';
+
+      this.db.all(sql, params, (err: any, rows: any[]) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(rows);
+        }
+      });
+    });
+  }
+
+  async getTeamPerformance(dateFrom?: Date, dateTo?: Date, team?: string, region?: string): Promise<any[]> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      let sql = 'SELECT * FROM view_team_performance WHERE 1=1';
+      const params: any[] = [];
+
+      if (dateFrom) {
+        sql += ' AND date >= ?';
+        params.push(dateFrom.toISOString().split('T')[0]);
+      }
+
+      if (dateTo) {
+        sql += ' AND date <= ?';
+        params.push(dateTo.toISOString().split('T')[0]);
+      }
+
+      if (team) {
+        sql += ' AND team = ?';
+        params.push(team);
+      }
+
+      if (region) {
+        sql += ' AND region = ?';
+        params.push(region);
+      }
+
+      sql += ' ORDER BY date DESC, team, region';
+
+      this.db.all(sql, params, (err: any, rows: any[]) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(rows);
+        }
+      });
+    });
+  }
+
+  async getMonthlyTrends(userId?: number, monthsBack: number = 6): Promise<any[]> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      const now = new Date();
+      const fromDate = new Date(now.getFullYear(), now.getMonth() - monthsBack, 1);
+      
+      let sql = `
+        SELECT 
+          year, month, user_id, client,
+          SUM(session_count) as session_count,
+          SUM(total_hours) as total_hours,
+          SUM(billable_hours) as billable_hours,
+          SUM(revenue) as revenue,
+          AVG(avg_hourly_rate) as avg_hourly_rate
+        FROM view_monthly_trends 
+        WHERE year >= ? AND month >= ?
+      `;
+      const params: any[] = [fromDate.getFullYear(), fromDate.getMonth() + 1];
+
+      if (userId) {
+        sql += ' AND user_id = ?';
+        params.push(userId);
+      }
+
+      sql += ' GROUP BY year, month, user_id, client ORDER BY year DESC, month DESC';
+
+      this.db.all(sql, params, (err: any, rows: any[]) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(rows);
+        }
+      });
+    });
+  }
+
+  // Analytics summary table population methods
+  async populateAnalyticsSummaries(): Promise<void> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    console.log('Populating analytics summary tables...');
+
+    return new Promise((resolve, reject) => {
+      this.db.serialize(() => {
+        this.db.run('BEGIN TRANSACTION');
+
+        // Populate daily summary from view
+        const populateDailySql = `
+          INSERT OR REPLACE INTO analytics_daily_summary 
+          (user_id, date, session_count, total_active_ms, billable_ms, unique_clients, revenue)
+          SELECT 
+            user_id,
+            date,
+            session_count,
+            total_active_ms,
+            billable_ms,
+            unique_clients,
+            ROUND((billable_ms / 3600000.0) * COALESCE(billableRate, 0), 2) as revenue
+          FROM user_daily_metrics_view
+          WHERE date >= DATE('now', '-30 days')
+        `;
+
+        this.db.run(populateDailySql, (err: any) => {
+          if (err) {
+            console.error('Error populating daily summary:', err);
+            this.db.run('ROLLBACK');
+            reject(err);
+            return;
+          }
+
+          // Populate monthly summary from view
+          const populateMonthlySql = `
+            INSERT OR REPLACE INTO analytics_monthly_summary 
+            (user_id, month, session_count, total_active_ms, billable_ms, unique_clients, revenue)
+            SELECT 
+              user_id,
+              month,
+              session_count,
+              total_active_ms,
+              billable_ms,
+              unique_clients,
+              monthly_revenue as revenue
+            FROM monthly_trends_view
+            WHERE month >= strftime('%Y-%m', DATE('now', '-12 months'))
+          `;
+
+          this.db.run(populateMonthlySql, (err: any) => {
+            if (err) {
+              console.error('Error populating monthly summary:', err);
+              this.db.run('ROLLBACK');
+              reject(err);
+            } else {
+              // Populate team summary from view
+              const populateTeamSql = `
+                INSERT OR REPLACE INTO analytics_team_summary 
+                (team, region, date, team_size, total_sessions, total_active_ms, team_revenue)
+                SELECT 
+                  team,
+                  region,
+                  date,
+                  team_size,
+                  total_sessions,
+                  total_active_ms,
+                  team_revenue
+                FROM team_performance_view
+                WHERE date >= DATE('now', '-30 days')
+              `;
+
+              this.db.run(populateTeamSql, (err: any) => {
+                if (err) {
+                  console.error('Error populating team summary:', err);
+                  this.db.run('ROLLBACK');
+                  reject(err);
+                } else {
+                  this.db.run('COMMIT');
+                  console.log('Analytics summary tables populated successfully');
+                  resolve();
+                }
+              });
+            }
+          });
+        });
+      });
+    });
+  }
+
+  // Keep the old version commented for reference
+  /*
+  async populateAnalyticsSummariesOld(): Promise<void> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    console.log('Populating analytics summary tables...');
+
+    return new Promise((resolve, reject) => {
+      this.db.serialize(() => {
+        this.db.run('BEGIN TRANSACTION');
+
+        // Populate daily summary
+        const populateDailySql = `
+          INSERT OR REPLACE INTO analytics_daily_summary 
+          (date, user_id, client, project, task, total_hours, billable_hours, session_count, revenue, created_at, updated_at)
+          SELECT 
+            DATE(start_time / 1000, 'unixepoch') as date,
+            user_id,
+            client,
+            project,
+            task,
+            SUM(active_ms) / (1000.0 * 60 * 60) as total_hours,
+            SUM(CASE WHEN is_billable = 1 THEN active_ms ELSE 0 END) / (1000.0 * 60 * 60) as billable_hours,
+            COUNT(*) as session_count,
+            SUM(CASE WHEN is_billable = 1 THEN 
+              (active_ms / (1000.0 * 60 * 60)) * COALESCE(u.billable_rate, 650) * (1 - COALESCE(u.discount_percentage, 0) / 100.0)
+              ELSE 0 END) as revenue,
+            ${Date.now()},
+            ${Date.now()}
+          FROM sessions s
+          LEFT JOIN users u ON s.user_id = u.id
+          WHERE s.start_time >= ${Date.now() - (30 * 24 * 60 * 60 * 1000)} -- Last 30 days
+          GROUP BY DATE(start_time / 1000, 'unixepoch'), user_id, client, project, task
+        `;
+
+        this.db.run(populateDailySql, (err: any) => {
+          if (err) {
+            console.error('Error populating daily summary:', err);
+            this.db.run('ROLLBACK');
+            reject(err);
+            return;
+          }
+
+          // Populate monthly summary
+          const populateMonthlySql = `
+            INSERT OR REPLACE INTO analytics_monthly_summary 
+            (year, month, user_id, client, total_hours, billable_hours, session_count, revenue, avg_session_length, utilization_rate, created_at, updated_at)
+            SELECT 
+              strftime('%Y', datetime(start_time / 1000, 'unixepoch')) as year,
+              strftime('%m', datetime(start_time / 1000, 'unixepoch')) as month,
+              user_id,
+              client,
+              SUM(active_ms) / (1000.0 * 60 * 60) as total_hours,
+              SUM(CASE WHEN is_billable = 1 THEN active_ms ELSE 0 END) / (1000.0 * 60 * 60) as billable_hours,
+              COUNT(*) as session_count,
+              SUM(CASE WHEN is_billable = 1 THEN 
+                (active_ms / (1000.0 * 60 * 60)) * COALESCE(u.billable_rate, 650) * (1 - COALESCE(u.discount_percentage, 0) / 100.0)
+                ELSE 0 END) as revenue,
+              AVG(active_ms) / (1000.0 * 60 * 60) as avg_session_length,
+              LEAST((SUM(active_ms) / (1000.0 * 60 * 60)) / 160.0 * 100, 100) as utilization_rate,
+              ${Date.now()},
+              ${Date.now()}
+            FROM sessions s
+            LEFT JOIN users u ON s.user_id = u.id
+            WHERE s.start_time >= ${Date.now() - (365 * 24 * 60 * 60 * 1000)} -- Last year
+            GROUP BY strftime('%Y', datetime(start_time / 1000, 'unixepoch')), 
+                     strftime('%m', datetime(start_time / 1000, 'unixepoch')), 
+                     user_id, client
+          `;
+
+          this.db.run(populateMonthlySql, (err: any) => {
+            if (err) {
+              console.error('Error populating monthly summary:', err);
+              this.db.run('ROLLBACK');
+              reject(err);
+            } else {
+              this.db.run('COMMIT');
+              console.log('Analytics summary tables populated successfully');
+              resolve();
+            }
+          });
+        });
+      });
+    });
+  }
+  */
+
   async close(): Promise<void> {
     this.isClosing = true;
     this.isInitialized = false;
@@ -2296,6 +2630,151 @@ class DatabaseService {
         resolve();
       }
     });
+  }
+
+  // Analytics table creation for performance optimization
+  async createAnalyticsTables(): Promise<void> {
+    await this.ensureReady();
+    
+    const queries = [
+      // Drop existing views first to ensure they're recreated with correct schema
+      'DROP VIEW IF EXISTS user_daily_metrics_view',
+      'DROP VIEW IF EXISTS client_profitability_view', 
+      'DROP VIEW IF EXISTS team_performance_view',
+      'DROP VIEW IF EXISTS monthly_trends_view',
+      
+      // Analytics views for aggregated data
+      `CREATE VIEW IF NOT EXISTS user_daily_metrics_view AS
+       SELECT 
+         s.user_id,
+         u.username,
+         u.team,
+         u.region,
+         u.job_level as jobLevel,
+         u.billable_rate as billableRate,
+         DATE(s.start_time/1000, 'unixepoch') as date,
+         COUNT(*) as session_count,
+         SUM(s.active_ms) as total_active_ms,
+         SUM(s.paused_ms) as total_paused_ms,
+         AVG(s.active_ms) as avg_session_ms,
+         SUM(CASE WHEN s.is_billable = 1 THEN s.active_ms ELSE 0 END) as billable_ms,
+         COUNT(DISTINCT s.client) as unique_clients,
+         COUNT(DISTINCT s.project) as unique_projects
+       FROM sessions s
+       LEFT JOIN users u ON s.user_id = u.id
+       WHERE s.user_id IS NOT NULL
+       GROUP BY s.user_id, DATE(s.start_time/1000, 'unixepoch')`,
+
+      `CREATE VIEW IF NOT EXISTS client_profitability_view AS
+       SELECT 
+         s.client,
+         s.user_id,
+         u.username,
+         u.billable_rate as billableRate,
+         COUNT(*) as session_count,
+         SUM(s.active_ms) as total_active_ms,
+         SUM(CASE WHEN s.is_billable = 1 THEN s.active_ms ELSE 0 END) as billable_ms,
+         ROUND(SUM(CASE WHEN s.is_billable = 1 THEN (s.active_ms / 3600000.0) * COALESCE(u.billable_rate, 0) ELSE 0 END), 2) as revenue
+       FROM sessions s
+       LEFT JOIN users u ON s.user_id = u.id
+       WHERE s.user_id IS NOT NULL
+       GROUP BY s.client, s.user_id`,
+
+      `CREATE VIEW IF NOT EXISTS team_performance_view AS
+       SELECT 
+         u.team,
+         u.region,
+         DATE(s.start_time/1000, 'unixepoch') as date,
+         COUNT(DISTINCT s.user_id) as team_size,
+         COUNT(*) as total_sessions,
+         SUM(s.active_ms) as total_active_ms,
+         AVG(s.active_ms) as avg_session_ms,
+         SUM(CASE WHEN s.is_billable = 1 THEN s.active_ms ELSE 0 END) as billable_ms,
+         ROUND(SUM(CASE WHEN s.is_billable = 1 THEN (s.active_ms / 3600000.0) * COALESCE(u.billable_rate, 0) ELSE 0 END), 2) as team_revenue
+       FROM sessions s
+       LEFT JOIN users u ON s.user_id = u.id
+       WHERE s.user_id IS NOT NULL AND u.team IS NOT NULL
+       GROUP BY u.team, u.region, DATE(s.start_time/1000, 'unixepoch')`,
+
+      `CREATE VIEW IF NOT EXISTS monthly_trends_view AS
+       SELECT 
+         s.user_id,
+         u.username,
+         u.team,
+         strftime('%Y-%m', datetime(s.start_time/1000, 'unixepoch')) as month,
+         COUNT(*) as session_count,
+         SUM(s.active_ms) as total_active_ms,
+         AVG(s.active_ms) as avg_session_ms,
+         SUM(CASE WHEN s.is_billable = 1 THEN s.active_ms ELSE 0 END) as billable_ms,
+         ROUND(SUM(CASE WHEN s.is_billable = 1 THEN (s.active_ms / 3600000.0) * COALESCE(u.billable_rate, 0) ELSE 0 END), 2) as monthly_revenue,
+         COUNT(DISTINCT s.client) as unique_clients
+       FROM sessions s
+       LEFT JOIN users u ON s.user_id = u.id
+       WHERE s.user_id IS NOT NULL
+       GROUP BY s.user_id, strftime('%Y-%m', datetime(s.start_time/1000, 'unixepoch'))`,
+
+      // Summary tables for pre-calculated metrics
+      `CREATE TABLE IF NOT EXISTS analytics_daily_summary (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         user_id INTEGER,
+         date TEXT,
+         session_count INTEGER,
+         total_active_ms INTEGER,
+         billable_ms INTEGER,
+         unique_clients INTEGER,
+         revenue DECIMAL(10,2),
+         created_at INTEGER DEFAULT (strftime('%s', 'now')),
+         FOREIGN KEY (user_id) REFERENCES users(id),
+         UNIQUE(user_id, date)
+       )`,
+
+      `CREATE TABLE IF NOT EXISTS analytics_monthly_summary (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         user_id INTEGER,
+         month TEXT,
+         session_count INTEGER,
+         total_active_ms INTEGER,
+         billable_ms INTEGER,
+         unique_clients INTEGER,
+         revenue DECIMAL(10,2),
+         created_at INTEGER DEFAULT (strftime('%s', 'now')),
+         FOREIGN KEY (user_id) REFERENCES users(id),
+         UNIQUE(user_id, month)
+       )`,
+
+      `CREATE TABLE IF NOT EXISTS analytics_team_summary (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         team TEXT,
+         region TEXT,
+         date TEXT,
+         team_size INTEGER,
+         total_sessions INTEGER,
+         total_active_ms INTEGER,
+         team_revenue DECIMAL(10,2),
+         created_at INTEGER DEFAULT (strftime('%s', 'now')),
+         UNIQUE(team, region, date)
+       )`
+    ];
+
+    for (const query of queries) {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          this.db.run(query, (err: any) => {
+            if (err) {
+              console.error('Error creating analytics table/view:', err);
+              reject(err);
+            } else {
+              resolve();
+            }
+          });
+        });
+      } catch (error) {
+        console.error('Failed to create analytics table/view:', error);
+        throw error;
+      }
+    }
+    
+    console.log('Analytics tables and views created successfully');
   }
 }
 

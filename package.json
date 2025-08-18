@@ -13,7 +13,7 @@
     "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:8080 && npx electron dist-electron/main.js\" --kill-others-on-fail",
     "electron:pack": "electron-builder",
     "electron:build": "npm run build && npm run build:electron && npm run electron:pack",
-    "build:electron": "tsc src/electron/database.ts --outDir dist-electron --target es2020 --module commonjs --moduleResolution node --esModuleInterop --skipLibCheck && tsc src/electron/main.ts --outDir dist-electron --target es2020 --module commonjs --moduleResolution node --esModuleInterop --skipLibCheck && tsc src/electron/preload.ts --outDir dist-electron --target es2020 --module commonjs --moduleResolution node --esModuleInterop --skipLibCheck"
+    "build:electron": "tsc src/electron/config-service.ts --outDir dist-electron --target es2020 --module commonjs --moduleResolution node --esModuleInterop --skipLibCheck && tsc src/electron/auth-service.ts --outDir dist-electron --target es2020 --module commonjs --moduleResolution node --esModuleInterop --skipLibCheck && tsc src/electron/database.ts --outDir dist-electron --target es2020 --module commonjs --moduleResolution node --esModuleInterop --skipLibCheck && tsc src/electron/main.ts --outDir dist-electron --target es2020 --module commonjs --moduleResolution node --esModuleInterop --skipLibCheck && tsc src/electron/preload.ts --outDir dist-electron --target es2020 --module commonjs --moduleResolution node --esModuleInterop --skipLibCheck"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
