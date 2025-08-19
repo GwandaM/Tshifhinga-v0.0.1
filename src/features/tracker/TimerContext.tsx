@@ -180,67 +180,116 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const handleIdleChoice = useCallback(async (choice: IdleChoice, nextTask?: TaskRef) => {
     const closeDialog = () => setIdleDialog({ open: false, idleMs: 0 });
 
+    console.log(`[Idle] Handling choice: ${choice}`, {
+      hasIdleStart: !!idleStartRef.current,
+      hasTask: !!timerState.task,
+      hasUser: !!user,
+      userId: user?.id
+    });
+
     if (!idleStartRef.current || !timerState.task) {
-      console.error("[Idle] Cannot handle choice, idle start time or task is missing.");
+      console.error("[Idle] Cannot handle choice, idle start time or task is missing.", {
+        idleStart: idleStartRef.current,
+        task: timerState.task
+      });
       return closeDialog();
     }
 
     const idleMs = Date.now() - idleStartRef.current;
     const originalTask = timerState.task;
 
-    // Stop the current timer at the beginning of the idle period
-    await window.electronAPI.timer.adjustTime(-idleMs);
-    await window.electronAPI.timer.stop({ notes: "Stopped due to user idle." });
+    console.log(`[Idle] Processing choice with idle time: ${Math.round(idleMs / 1000)}s`);
 
-    switch (choice) {
-      case 'continue':
-        // Start a new timer for the original task
-        start(originalTask);
-        break;
+    try {
+      switch (choice) {
+        case 'continue':
+          console.log("[Idle] Continuing with original task - keeping idle time");
+          // Add the idle time to the timer (as if it kept running) then resume
+          await window.electronAPI.timer.adjustTime(idleMs);
+          window.electronAPI.timer.resume();
+          break;
 
-      case 'break':
-        // Time is already discarded by stopping at idle start. Do nothing further.
-        break;
+        case 'break':
+          console.log("[Idle] Break chosen - time discarded");
+          // Stop the current timer at the beginning of the idle period (discard idle time)
+          await window.electronAPI.timer.adjustTime(-idleMs);
+          await window.electronAPI.timer.stop({ notes: "Stopped due to user idle.", token });
+          break;
 
-      case 'meeting':
-      case 'admin':
-        // Create a new session for the idle period
-        const meetingTask: TaskRef = {
-          client: "Internal",
-          project: "Meetings & Admin",
-          task: choice === 'meeting' ? "Meeting" : "Admin / Non-billable",
-        };
-        await electronDB.insertSession({
-          id: `session-${Date.now()}`,
-          task: meetingTask,
-          start: idleStartRef.current,
-          end: Date.now(),
-          activeMs: idleMs,
-          pausedMs: 0,
-          notes: "Logged from idle time.",
-          createdAt: Date.now(),
-          isBillable: false,
-          userId: user?.id,
-        });
-        // After logging the meeting/admin time, start a new timer for the original task
-        start(originalTask);
-        break;
+        case 'meeting':
+        case 'admin':
+          console.log(`[Idle] Creating ${choice} session for idle period`);
+          
+          // First, stop the current timer at the beginning of the idle period
+          await window.electronAPI.timer.adjustTime(-idleMs);
+          await window.electronAPI.timer.stop({ notes: "Stopped due to user idle.", token });
+          
+          // Create a new session for the idle period
+          const meetingTask: TaskRef = {
+            client: "Company",
+            project: choice === 'meeting' ? "Meetings" : "Admin",
+            task: "General",
+          };
+          
+          const sessionData = {
+            id: `session-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`,
+            task: meetingTask,
+            start: idleStartRef.current,
+            end: Date.now(),
+            activeMs: idleMs,
+            pausedMs: 0,
+            notes: "Logged from idle time.",
+            createdAt: Date.now(),
+            isBillable: false,
+            userId: user?.id,
+          };
 
-      case 'switch':
-        if (nextTask) {
-          // Start a new timer for the selected task
-          start(nextTask);
-        }
-        break;
+          console.log("[Idle] Inserting session:", sessionData);
+          
+          try {
+            await electronDB.insertSession(sessionData);
+            console.log(`[Idle] Successfully inserted ${choice} session`);
+          } catch (error) {
+            console.error(`[Idle] Failed to insert ${choice} session:`, error);
+            // Continue with the flow even if session insertion fails
+          }
+          
+          // After logging the meeting/admin time, start a new timer for the original task
+          console.log("[Idle] Starting timer for original task after logging idle time");
+          start(originalTask);
+          break;
+
+        case 'switch':
+          console.log("[Idle] Switching to new task");
+          // Stop the current timer at the beginning of the idle period (discard idle time)
+          await window.electronAPI.timer.adjustTime(-idleMs);
+          await window.electronAPI.timer.stop({ notes: "Stopped due to user idle.", token });
+          
+          if (nextTask) {
+            console.log("[Idle] Starting timer for new task:", nextTask);
+            // Start a new timer for the selected task
+            start(nextTask);
+          } else {
+            console.log("[Idle] Switch chosen but no next task provided");
+          }
+          break;
+      }
+
+      // Reset idle state tracking after handling the choice
+      idleStartRef.current = null;
+      wasRunningBeforeIdleRef.current = false;
+
+      console.log("[Idle] Refreshing sessions and closing dialog");
+      refreshSessions();
+      closeDialog();
+    } catch (error) {
+      console.error("[Idle] Error handling idle choice:", error);
+      // Still close the dialog and reset state even if there's an error
+      idleStartRef.current = null;
+      wasRunningBeforeIdleRef.current = false;
+      closeDialog();
     }
-
-    // Reset idle state tracking after handling the choice
-    idleStartRef.current = null;
-    wasRunningBeforeIdleRef.current = false;
-
-    refreshSessions();
-    closeDialog();
-  }, [timerState.task, user?.id, refreshSessions, start]);
+  }, [timerState.task, user?.id, refreshSessions, start, token]);
 
   const sessionsToday = React.useMemo(() => {
     const startOfDay = new Date();
