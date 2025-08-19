@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useState, useRef } from "react";
 import { electronDB, type SessionRecord as DBSessionRecord } from "@/lib/electron-database";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -30,10 +30,12 @@ interface TimerState {
   startTs?: number;
 }
 
-interface IdleDialog {
+interface IdleDialogState {
   open: boolean;
   idleMs: number;
 }
+
+export type IdleChoice = "continue" | "break" | "switch" | "meeting" | "admin";
 
 interface TimerContextValue extends TimerState {
   notes: string;
@@ -48,180 +50,120 @@ interface TimerContextValue extends TimerState {
   sessionsToday: SessionRecord[];
   totalTodayMs: number;
   refreshSessions: () => void;
-  handleIdleChoice: (choice: 'discard' | 'keep') => void;
-  idleDialog: IdleDialog;
+  handleIdleChoice: (choice: IdleChoice, nextTask?: TaskRef) => void;
+  idleDialog: IdleDialogState;
 }
 
 const TimerContext = createContext<TimerContextValue | undefined>(undefined);
+
+const IDLE_THRESHOLD_MS = 60 * 1000; // 60 seconds
 
 export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, hasPermission, token } = useAuth();
   const [timerState, setTimerState] = useState<TimerState>({ status: "stopped", activeMs: 0, pausedMs: 0 });
   const [notes, setNotes] = useState("");
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
-  const [isElectron, setIsElectron] = useState(false);
-  const [idleDialog, setIdleDialog] = useState<IdleDialog>({ open: false, idleMs: 0 });
-  const listenersRef = React.useRef<{
-    stateSync?: () => void;
-    refreshSessions?: () => void;
-    powerMonitor?: {
-      suspend?: () => void;
-      resume?: () => void;
-      screenLock?: () => void;
-      screenUnlock?: () => void;
-    };
-  }>({});
-  const lastActivityRef = React.useRef<number>(Date.now());
+  const [idleDialog, setIdleDialog] = useState<IdleDialogState>({ open: false, idleMs: 0 });
+  
+  const timerStateRef = useRef(timerState);
+  useEffect(() => {
+    timerStateRef.current = timerState;
+  }, [timerState]);
+
+  const idleStartRef = useRef<number | null>(null);
+  const wasRunningBeforeIdleRef = useRef<boolean>(false);
 
   const refreshSessions = useCallback(async () => {
-    if ((window as any).electronAPI && user) {
-      let dbSessions;
-      // Admin can see all sessions, regular users only see their own
-      if (hasPermission('view_all_sessions')) {
-        console.log('Admin user - fetching all sessions');
-        dbSessions = await electronDB.getAllSessions();
-      } else {
-        console.log('Regular user - fetching user sessions for user ID:', user.id);
-        dbSessions = await electronDB.getUserSessions(user.id);
-      }
-      console.log('Retrieved sessions:', dbSessions.length, dbSessions);
+    if (window.electronAPI && user) {
+      const dbSessions = hasPermission('view_all_sessions')
+        ? await electronDB.getAllSessions()
+        : await electronDB.getUserSessions(user.id);
       setSessions(dbSessions.map(dbRecordToSessionRecord));
     }
   }, [user, hasPermission]);
 
   useEffect(() => {
-    const electronAvailable = !!(window as any).electronAPI;
-    setIsElectron(electronAvailable);
+    if (!window.electronAPI) return;
 
-    if (electronAvailable) {
-      // Get initial state from main process
-      (window as any).electronAPI.timer.getState().then(setTimerState);
+    // Get initial state from main process
+    window.electronAPI.timer.getState().then(setTimerState);
 
-      // Listen for state sync from main process
-      const handleStateSync = (_event: any, state: TimerState) => {
-        setTimerState(state);
-      };
-      listenersRef.current.stateSync = handleStateSync;
-      (window as any).electronAPI.timer.onStateSync(handleStateSync);
+    // Listen for state sync from main process
+    const removeStateSyncListener = window.electronAPI.timer.onStateSync((_event, state) => {
+      setTimerState(state);
+    });
 
-      // Listen for session refresh requests
-      const handleRefresh = () => refreshSessions();
-      listenersRef.current.refreshSessions = handleRefresh;
-      (window as any).electronAPI.timer.onTimerAction('refresh-sessions', handleRefresh);
+    const removeRefreshListener = window.electronAPI.timer.onTimerAction('refresh-sessions', refreshSessions);
 
-      // Initial load of sessions
-      refreshSessions();
+    // --- Idle Detection Logic ---
+    const handleIdle = (timestamp: number) => {
+      if (timerStateRef.current.status === 'running') {
+        console.log(`[Idle] Idle state detected at ${new Date(timestamp).toLocaleTimeString()}`);
+        wasRunningBeforeIdleRef.current = true;
+        idleStartRef.current = timestamp;
+        window.electronAPI.timer.pause(); // Pause the timer to stop accumulation
+      }
+    };
 
-      // Set up power monitor listeners for idle detection
-      const handleSystemSuspend = (_event: any, suspendTime: number) => {
-        if (timerState.status === 'running') {
-          lastActivityRef.current = suspendTime;
-          console.log('System suspended while timer running');
+    const handleActive = (timestamp: number) => {
+      if (wasRunningBeforeIdleRef.current && idleStartRef.current) {
+        const idleMs = timestamp - idleStartRef.current;
+        console.log(`[Idle] Active state resumed. Idle for ${Math.round(idleMs / 1000)}s`);
+
+        if (idleMs > IDLE_THRESHOLD_MS) {
+          setIdleDialog({ open: true, idleMs });
+        } else {
+          // If idle time is less than threshold, just resume the timer
+          window.electronAPI.timer.resume();
+          // Reset idle state tracking since we are not showing a dialog
+          idleStartRef.current = null;
+          wasRunningBeforeIdleRef.current = false;
         }
-      };
+      }
+    };
 
-      const handleSystemResume = (_event: any, { wakeTime, sleepDuration }: { wakeTime: number; sleepDuration: number }) => {
-        if (timerState.status === 'running' && sleepDuration > 30000) { // Only show dialog if idle for more than 30 seconds
-          console.log('System resumed, showing idle dialog for', sleepDuration, 'ms');
-          setIdleDialog({
-            open: true,
-            idleMs: sleepDuration
-          });
-        }
-      };
+    const removeSuspendListener = window.electronAPI.powerMonitor.onSystemSuspend((_, ts) => handleIdle(ts));
+    const removeLockListener = window.electronAPI.powerMonitor.onScreenLock((_, ts) => handleIdle(ts));
+    const removeResumeListener = window.electronAPI.powerMonitor.onSystemResume((_, data) => handleActive(data.wakeTime));
+    const removeUnlockListener = window.electronAPI.powerMonitor.onScreenUnlock((_, ts) => handleActive(ts));
 
-      const handleScreenLock = (_event: any, lockTime: number) => {
-        if (timerState.status === 'running') {
-          lastActivityRef.current = lockTime;
-          console.log('Screen locked while timer running');
-        }
-      };
+    // Initial load of sessions
+    refreshSessions();
 
-      const handleScreenUnlock = (_event: any, unlockTime: number) => {
-        if (timerState.status === 'running' && lastActivityRef.current) {
-          const idleTime = unlockTime - lastActivityRef.current;
-          if (idleTime > 30000) { // Only show dialog if idle for more than 30 seconds
-            console.log('Screen unlocked, showing idle dialog for', idleTime, 'ms');
-            setIdleDialog({
-              open: true,
-              idleMs: idleTime
-            });
-          }
-        }
-        lastActivityRef.current = unlockTime;
-      };
-
-      // Store power monitor listeners
-      listenersRef.current.powerMonitor = {
-        suspend: handleSystemSuspend,
-        resume: handleSystemResume,
-        screenLock: handleScreenLock,
-        screenUnlock: handleScreenUnlock
-      };
-
-      // Set up power monitor listeners
-      (window as any).electronAPI.powerMonitor.onSystemSuspend(handleSystemSuspend);
-      (window as any).electronAPI.powerMonitor.onSystemResume(handleSystemResume);
-      (window as any).electronAPI.powerMonitor.onScreenLock(handleScreenLock);
-      (window as any).electronAPI.powerMonitor.onScreenUnlock(handleScreenUnlock);
-
-      return () => {
-        // Remove specific listeners we added
-        if ((window as any).electronAPI) {
-          try {
-            // Use the specific listener references if available
-            const { ipcRenderer } = require('electron');
-            if (listenersRef.current.stateSync) {
-              ipcRenderer.removeListener('timer:state-sync', listenersRef.current.stateSync);
-            }
-            if (listenersRef.current.refreshSessions) {
-              ipcRenderer.removeListener('timer-action-refresh-sessions', listenersRef.current.refreshSessions);
-            }
-            // Fallback to removeAllListeners
-            (window as any).electronAPI.timer.removeAllListeners('timer:state-sync');
-            (window as any).electronAPI.timer.removeAllListeners('timer-action-refresh-sessions');
-            
-            // Remove power monitor listeners
-            (window as any).electronAPI.powerMonitor.removeAllListeners();
-          } catch (error) {
-            console.warn('Error removing listeners:', error);
-            // Clear references
-            listenersRef.current = {};
-          }
-        }
-      };
-    }
+    return () => {
+      // Cleanup all listeners
+      removeStateSyncListener();
+      removeRefreshListener();
+      removeSuspendListener();
+      removeLockListener();
+      removeResumeListener();
+      removeUnlockListener();
+    };
   }, [refreshSessions]);
 
   const start = useCallback((t: TaskRef) => {
-    lastActivityRef.current = Date.now();
-    (window as any).electronAPI?.timer.start(t);
+    window.electronAPI?.timer.start(t);
   }, []);
 
   const pause = useCallback(() => {
-    (window as any).electronAPI?.timer.pause();
+    window.electronAPI?.timer.pause();
   }, []);
 
   const resume = useCallback(() => {
-    lastActivityRef.current = Date.now();
-    (window as any).electronAPI?.timer.resume();
+    window.electronAPI?.timer.resume();
   }, []);
 
   const stop = useCallback(async (n?: string) => {
-    await (window as any).electronAPI?.timer.stop({ 
-      notes: n ?? notes, 
-      token 
-    });
+    await window.electronAPI?.timer.stop({ notes: n ?? notes, token });
     setNotes("");
     refreshSessions();
   }, [notes, refreshSessions, token]);
 
   const setTask = useCallback((t?: TaskRef) => {
-    (window as any).electronAPI?.timer.setTask(t);
+    window.electronAPI?.timer.setTask(t);
   }, []);
 
   const updateSession = useCallback(async (id: string, updates: { task?: TaskRef; notes?: string }) => {
-    // Transform TaskRef to individual fields for the database
     const dbUpdates: any = {};
     if (updates.task) {
       dbUpdates.client = updates.task.client;
@@ -235,16 +177,70 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     refreshSessions();
   }, [refreshSessions]);
 
-  const handleIdleChoice = useCallback((choice: 'discard' | 'keep') => {
-    if (choice === 'discard') {
-      // Reset timer to previous state before idle period
-      const newActiveMs = Math.max(0, timerState.activeMs - idleDialog.idleMs);
-      setTimerState(prev => ({ ...prev, activeMs: newActiveMs }));
-      (window as any).electronAPI?.timer.adjustTime(-idleDialog.idleMs);
+  const handleIdleChoice = useCallback(async (choice: IdleChoice, nextTask?: TaskRef) => {
+    const closeDialog = () => setIdleDialog({ open: false, idleMs: 0 });
+
+    if (!idleStartRef.current || !timerState.task) {
+      console.error("[Idle] Cannot handle choice, idle start time or task is missing.");
+      return closeDialog();
     }
-    // If 'keep', do nothing - the time is already included
-    setIdleDialog({ open: false, idleMs: 0 });
-  }, [timerState.activeMs, idleDialog.idleMs]);
+
+    const idleMs = Date.now() - idleStartRef.current;
+    const originalTask = timerState.task;
+
+    // Stop the current timer at the beginning of the idle period
+    await window.electronAPI.timer.adjustTime(-idleMs);
+    await window.electronAPI.timer.stop({ notes: "Stopped due to user idle." });
+
+    switch (choice) {
+      case 'continue':
+        // Start a new timer for the original task
+        start(originalTask);
+        break;
+
+      case 'break':
+        // Time is already discarded by stopping at idle start. Do nothing further.
+        break;
+
+      case 'meeting':
+      case 'admin':
+        // Create a new session for the idle period
+        const meetingTask: TaskRef = {
+          client: "Internal",
+          project: "Meetings & Admin",
+          task: choice === 'meeting' ? "Meeting" : "Admin / Non-billable",
+        };
+        await electronDB.insertSession({
+          id: `session-${Date.now()}`,
+          task: meetingTask,
+          start: idleStartRef.current,
+          end: Date.now(),
+          activeMs: idleMs,
+          pausedMs: 0,
+          notes: "Logged from idle time.",
+          createdAt: Date.now(),
+          isBillable: false,
+          userId: user?.id,
+        });
+        // After logging the meeting/admin time, start a new timer for the original task
+        start(originalTask);
+        break;
+
+      case 'switch':
+        if (nextTask) {
+          // Start a new timer for the selected task
+          start(nextTask);
+        }
+        break;
+    }
+
+    // Reset idle state tracking after handling the choice
+    idleStartRef.current = null;
+    wasRunningBeforeIdleRef.current = false;
+
+    refreshSessions();
+    closeDialog();
+  }, [timerState.task, user?.id, refreshSessions, start]);
 
   const sessionsToday = React.useMemo(() => {
     const startOfDay = new Date();

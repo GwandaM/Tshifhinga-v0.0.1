@@ -433,9 +433,6 @@ electronApp.whenReady().then(async () => {
     // Create tray immediately
     createTray();
     
-    // Start timer state validation
-    startTimerStateValidation();
-    
     console.log('Application initialized successfully');
     
   } catch (error) {
@@ -446,43 +443,38 @@ electronApp.whenReady().then(async () => {
 
   // Set up power monitor events for system sleep/wake detection
   powerMonitor.on('suspend', () => {
-    console.log('System is going to sleep');
+    console.log('[PowerMonitor] System is going to sleep');
     systemSleepTime = Date.now();
-    // Notify renderer process about system sleep
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('system-suspend', systemSleepTime);
-    }
+    // Notify all renderer processes about system sleep
+    const windows = [mainWindow, miniWindow].filter(w => w && !w.isDestroyed());
+    windows.forEach(win => win.webContents.send('system-suspend', systemSleepTime));
   });
 
   powerMonitor.on('resume', () => {
-    console.log('System woke up');
+    console.log('[PowerMonitor] System woke up');
     const wakeTime = Date.now();
     const sleepDuration = systemSleepTime ? wakeTime - systemSleepTime : 0;
-    console.log(`System was asleep for ${Math.round(sleepDuration / 1000)}s`);
+    console.log(`[PowerMonitor] System was asleep for ${Math.round(sleepDuration / 1000)}s`);
     
-    // Notify renderer process about system wake
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('system-resume', { wakeTime, sleepDuration });
-    }
+    // Notify all renderer processes about system wake
+    const windows = [mainWindow, miniWindow].filter(w => w && !w.isDestroyed());
+    windows.forEach(win => win.webContents.send('system-resume', { wakeTime, sleepDuration }));
     
     systemSleepTime = null;
   });
 
   powerMonitor.on('lock-screen', () => {
-    console.log('Screen locked');
-    // Notify renderer process about screen lock
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('screen-lock', Date.now());
-    }
+    console.log('[PowerMonitor] Screen locked');
+    // Notify all renderer processes about screen lock
+    const windows = [mainWindow, miniWindow].filter(w => w && !w.isDestroyed());
+    windows.forEach(win => win.webContents.send('screen-lock', Date.now()));
   });
 
   powerMonitor.on('unlock-screen', () => {
-    console.log('Screen unlocked');
-    // Notify renderer process about screen unlock
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('screen-unlock', Date.now());
-    }
-  });
+    console.log('[PowerMonitor] Screen unlocked');
+    // Notify all renderer processes about screen unlock
+    const windows = [mainWindow, miniWindow].filter(w => w && !w.isDestroyed());
+    windows.forEach(win => win.webContents.send('screen-unlock', Date.now()));
 
   electronApp.on('activate', () => {
     // On macOS, re-create a window when dock icon is clicked
@@ -740,6 +732,9 @@ const startTimerStateValidation = () => {
   }, 30000); // Check every 30 seconds
 };
 
+// Start timer state validation
+startTimerStateValidation();
+
 const stopTimerStateValidation = () => {
   if (stateValidationInterval) {
     clearInterval(stateValidationInterval);
@@ -941,7 +936,7 @@ ipcMain.on('timer:resume', () => {
   }
 });
 
-ipcMain.on('timer:stop', async (_, data) => {
+ipcMain.handle('timer:stop', async (_, data) => {
   const stopTime = Date.now();
   
   try {
@@ -1024,14 +1019,14 @@ ipcMain.on('timer:stop', async (_, data) => {
       });
     }
     
-    // Reset timer state
+    // Reset timer state (preserve task selection for UI)
     currentTimerState = {
       status: 'stopped',
       activeMs: 0,
       pausedMs: 0,
       startTs: null,
       lastUpdateTs: null,
-      task: null
+      task: currentTimerState.task // Keep the task selected in UI
     };
     
     broadcastTimerState();
@@ -1271,4 +1266,9 @@ ipcMain.handle('auth:update-user-role', async (_, userId, role) => {
 
 ipcMain.handle('auth:deactivate-user', async (_, userId) => {
   return await authService.deactivateUser(userId);
+});
+
+}).catch((error) => {
+  console.error('Failed to initialize application:', error);
+  electronApp.quit();
 });

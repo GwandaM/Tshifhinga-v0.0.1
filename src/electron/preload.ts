@@ -70,34 +70,48 @@ const electronAPI = {
     closeTaskSelector: () => ipcRenderer.invoke('window:close-task-selector'),
   },
   timer: {
-    onStateSync: (callback) => ipcRenderer.on('timer:state-sync', callback),
-    onTimerAction: (action, callback) => ipcRenderer.on(`timer-action-${action}`, callback),
+    // Return a cleanup function for each listener
+    onStateSync: (callback) => {
+      ipcRenderer.on('timer:state-sync', callback);
+      return () => ipcRenderer.removeListener('timer:state-sync', callback);
+    },
+    onTimerAction: (action, callback) => {
+      const channel = `timer-action-${action}`;
+      ipcRenderer.on(channel, callback);
+      return () => ipcRenderer.removeListener(channel, callback);
+    },
     start: (task) => ipcRenderer.send('timer:start', task),
     pause: () => ipcRenderer.send('timer:pause'),
     resume: () => ipcRenderer.send('timer:resume'),
-    stop: (notes) => ipcRenderer.send('timer:stop', notes),
+    stop: (data) => ipcRenderer.invoke('timer:stop', data), // Use invoke for async operations
     setTask: (task) => ipcRenderer.send('timer:set-task', task),
     getState: () => ipcRenderer.invoke('timer:get-state'),
     adjustTime: (adjustment) => ipcRenderer.invoke('timer:adjust-time', adjustment),
-    removeAllListeners: (channel) => {
-      ipcRenderer.removeAllListeners(channel);
-    },
     selectTask: (task) => ipcRenderer.send('task:selected', task),
-    onTaskSelected: (callback) => ipcRenderer.on('task:selected', callback),
+    onTaskSelected: (callback) => {
+      ipcRenderer.on('task:selected', callback);
+      return () => ipcRenderer.removeListener('task:selected', callback);
+    },
   },
   showSaveDialog: (options) => ipcRenderer.invoke('showSaveDialog', options),
   writeFile: (filePath, content) => ipcRenderer.invoke('writeFile', filePath, content),
   powerMonitor: {
-    onSystemSuspend: (callback) => ipcRenderer.on('system-suspend', callback),
-    onSystemResume: (callback) => ipcRenderer.on('system-resume', callback),
-    onScreenLock: (callback) => ipcRenderer.on('screen-lock', callback),
-    onScreenUnlock: (callback) => ipcRenderer.on('screen-unlock', callback),
-    removeAllListeners: () => {
-      ipcRenderer.removeAllListeners('system-suspend');
-      ipcRenderer.removeAllListeners('system-resume');
-      ipcRenderer.removeAllListeners('screen-lock');
-      ipcRenderer.removeAllListeners('screen-unlock');
-    }
+    onSystemSuspend: (callback) => {
+      ipcRenderer.on('system-suspend', callback);
+      return () => ipcRenderer.removeListener('system-suspend', callback);
+    },
+    onSystemResume: (callback) => {
+      ipcRenderer.on('system-resume', callback);
+      return () => ipcRenderer.removeListener('system-resume', callback);
+    },
+    onScreenLock: (callback) => {
+      ipcRenderer.on('screen-lock', callback);
+      return () => ipcRenderer.removeListener('screen-lock', callback);
+    },
+    onScreenUnlock: (callback) => {
+      ipcRenderer.on('screen-unlock', callback);
+      return () => ipcRenderer.removeListener('screen-unlock', callback);
+    },
   },
   auth: {
     login: (username, password) => ipcRenderer.invoke('auth:login', username, password),
