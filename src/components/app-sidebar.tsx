@@ -19,7 +19,7 @@ import { useAuth } from "@/contexts/AuthContext";
 const items = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
   { title: "Timer", url: "/", icon: Clock },
-  { title: "Calendar", url: "/calendar", icon: CalendarDays },
+  { title: "Timesheet", url: "/calendar", icon: CalendarDays },
   { title: "Reports", url: "/reports", icon: BarChart3 },
 ];
 

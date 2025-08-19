@@ -2,6 +2,15 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Drag and drop styles */
+.drag-over {
+  @apply ring-2 ring-primary ring-opacity-50 bg-primary/5;
+}
+
+.dragging {
+  @apply opacity-50 scale-95;
+}
+
 /* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
 All colors MUST be HSL.
 */
