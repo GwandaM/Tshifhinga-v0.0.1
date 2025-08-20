@@ -48,6 +48,13 @@ class ElectronDatabaseService {
     return await window.electronAPI.database.insertSession(session);
   }
 
+  async addSession(session: SessionRecord): Promise<void> {
+    if (!this.isElectron()) {
+      throw new Error('Not running in Electron environment');
+    }
+    return await window.electronAPI.database.addSession(session);
+  }
+
   async updateSession(id: string, updates: { 
     client?: string; 
     project?: string; 
@@ -224,6 +231,59 @@ class ElectronDatabaseService {
       throw new Error('Not running in Electron environment');
     }
     return await window.electronAPI.database.populateAnalyticsSummaries();
+  }
+
+  // Session editing methods
+  async editSession(sessionId: string, userId: number, updates: {
+    startTime?: number;
+    endTime?: number;
+    client?: string;
+    project?: string;
+    task?: string;
+    notes?: string;
+  }, editReason: string): Promise<void> {
+    if (!this.isElectron()) {
+      throw new Error('Not running in Electron environment');
+    }
+    return await window.electronAPI.database.editSession(sessionId, userId, updates, editReason);
+  }
+
+  async getSessionEditHistory(sessionId: string): Promise<any[]> {
+    if (!this.isElectron()) {
+      throw new Error('Not running in Electron environment');
+    }
+    return await window.electronAPI.database.getSessionEditHistory(sessionId);
+  }
+
+  async validateSessionEdit(sessionId: string, updates: {
+    startTime?: number;
+    endTime?: number;
+  }, userId: number): Promise<{ isValid: boolean; errors: string[] }> {
+    if (!this.isElectron()) {
+      throw new Error('Not running in Electron environment');
+    }
+    return await window.electronAPI.database.validateSessionEdit(sessionId, updates, userId);
+  }
+
+  async getUserReliabilityRate(userId: number, weekStart: Date): Promise<number> {
+    if (!this.isElectron()) {
+      throw new Error('Not running in Electron environment');
+    }
+    return await window.electronAPI.database.getUserReliabilityRate(userId, weekStart);
+  }
+
+  async getAllUserReliabilityMetrics(): Promise<any[]> {
+    if (!this.isElectron()) {
+      throw new Error('Not running in Electron environment');
+    }
+    return await window.electronAPI.database.getAllUserReliabilityMetrics();
+  }
+
+  async updateUserReliabilityMetrics(userId: number): Promise<void> {
+    if (!this.isElectron()) {
+      throw new Error('Not running in Electron environment');
+    }
+    return await window.electronAPI.database.updateUserReliabilityMetrics(userId);
   }
 }
 

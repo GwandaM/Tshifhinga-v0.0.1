@@ -1074,6 +1074,10 @@ ipcMain.handle('db:insertSession', async (_, session) => {
   return await dbService.insertSession(session);
 });
 
+ipcMain.handle('db:addSession', async (_, session) => {
+  return await dbService.addSession(session);
+});
+
 ipcMain.handle('db:updateSession', async (_, id, updates) => {
   return await dbService.updateSession(id, updates);
 });
@@ -1088,6 +1092,31 @@ ipcMain.handle('db:getSessionsByDateRange', async (_, startDate, endDate) => {
 
 ipcMain.handle('db:getClientSummary', async () => {
   return await dbService.getClientSummary();
+});
+
+// Session editing handlers
+ipcMain.handle('db:editSession', async (_, sessionId, userId, updates, editReason) => {
+  return await dbService.editSession(sessionId, userId, updates, editReason);
+});
+
+ipcMain.handle('db:getSessionEditHistory', async (_, sessionId) => {
+  return await dbService.getSessionEditHistory(sessionId);
+});
+
+ipcMain.handle('db:validateSessionEdit', async (_, sessionId, updates, userId) => {
+  return await dbService.validateSessionEdit(sessionId, updates, userId);
+});
+
+ipcMain.handle('db:getUserReliabilityRate', async (_, userId, weekStart) => {
+  return await dbService.getUserReliabilityRate(userId, weekStart);
+});
+
+ipcMain.handle('db:getAllUserReliabilityMetrics', async () => {
+  return await dbService.getAllUserReliabilityMetrics();
+});
+
+ipcMain.handle('db:updateUserReliabilityMetrics', async (_, userId) => {
+  return await dbService.updateUserReliabilityMetrics(userId);
 });
 
 ipcMain.handle('db:migrateFromLocalStorage', async (_, data) => {

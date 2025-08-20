@@ -3,14 +3,32 @@ import { useTimer } from "@/features/tracker/TimerContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ChevronLeft, ChevronRight, Clock, ChevronDown, ChevronUp } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ChevronLeft, ChevronRight, Clock, ChevronDown, ChevronUp, Edit, BarChart3, Grid, Plus } from "lucide-react";
 import { SessionTimeline } from "@/components/ui/session-timeline";
+import { EditSessionModal } from "@/components/ui/edit-session-modal";
+import { SessionHistoryModal } from "@/components/ui/session-history-modal";
+import { AddSessionModal } from "@/components/ui/add-session-modal";
+import { TimelineView } from "@/components/ui/timeline-view";
 import { cn } from "@/lib/utils";
+import type { SessionRecord } from "@/features/tracker/TimerContext";
 
 const CalendarPage: React.FC = () => {
-  const { sessions } = useTimer();
+  const { sessions, editSession, getSessionEditHistory, validateSessionEdit, addSession } = useTimer();
   const [currentWeek, setCurrentWeek] = useState<Date>(new Date());
   const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set());
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [viewMode, setViewMode] = useState<'grid' | 'timeline'>('grid');
+  
+  // Edit session modal state
+  const [editingSession, setEditingSession] = useState<SessionRecord | null>(null);
+  const [historySessionId, setHistorySessionId] = useState<string | null>(null);
+  
+  // Add session modal state
+  const [addingSession, setAddingSession] = useState<{
+    date: Date;
+    prefilledTime?: { start: string; end: string };
+  } | null>(null);
 
   useEffect(() => {
     document.title = "Tshifhinga — Weekly Calendar";
@@ -131,6 +149,76 @@ const CalendarPage: React.FC = () => {
     return colors[Math.abs(hash) % colors.length];
   };
 
+  // Session editing handlers
+  const handleEditSession = (session: SessionRecord) => {
+    setEditingSession(session);
+  };
+
+  const handleSaveSession = async (updates: any, editReason: string) => {
+    if (!editingSession) return;
+    
+    try {
+      await editSession(editingSession.id, updates, editReason);
+      setEditingSession(null);
+    } catch (error) {
+      console.error('Failed to save session:', error);
+      throw error; // Re-throw to show error in modal
+    }
+  };
+
+  const handleViewHistory = (sessionId: string) => {
+    setHistorySessionId(sessionId);
+  };
+
+  const handleTimeAdjustment = async (sessionId: string, updates: { startTime: Date; endTime: Date }) => {
+    try {
+      await editSession(sessionId, {
+        startTime: updates.startTime,
+        endTime: updates.endTime,
+      }, 'Timeline drag adjustment');
+    } catch (error) {
+      console.error('Failed to adjust session time:', error);
+      throw error;
+    }
+  };
+
+  const handleAddSession = (date: Date, prefilledTime?: { start: string; end: string }) => {
+    setAddingSession({
+      date,
+      prefilledTime,
+    });
+  };
+
+  const handleSaveNewSession = async (sessionData: {
+    startTime: Date;
+    endTime: Date;
+    client: string;
+    project: string;
+    task: string;
+    notes?: string;
+  }) => {
+    try {
+      await addSession(sessionData);
+      setAddingSession(null);
+    } catch (error) {
+      console.error('Failed to create session:', error);
+      throw error; // Re-throw to show error in modal
+    }
+  };
+
+  // Get sessions for selected date (for timeline view)
+  const selectedDateSessions = useMemo(() => {
+    const dayStart = new Date(selectedDate);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(selectedDate);
+    dayEnd.setHours(23, 59, 59, 999);
+
+    return sessions.filter(session => {
+      const sessionDate = new Date(session.start);
+      return sessionDate >= dayStart && sessionDate <= dayEnd;
+    });
+  }, [sessions, selectedDate]);
+
   return (
     <div className="min-h-screen bg-background p-6">
       <div className="w-full max-w-7xl mx-auto">
@@ -179,8 +267,22 @@ const CalendarPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Weekly grid */}
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+        {/* View Mode Tabs */}
+        <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as 'grid' | 'timeline')} className="w-full">
+          <TabsList className="grid w-full grid-cols-2 max-w-md mb-6">
+            <TabsTrigger value="grid" className="flex items-center gap-2">
+              <Grid className="w-4 h-4" />
+              Weekly Grid
+            </TabsTrigger>
+            <TabsTrigger value="timeline" className="flex items-center gap-2">
+              <BarChart3 className="w-4 h-4" />
+              Daily Timeline
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="grid">
+            {/* Weekly grid */}
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
           {dailyData.map((dayData, index) => {
             const dateString = dayData.date.toISOString();
             const isExpanded = expandedDays.has(dateString);
@@ -209,20 +311,56 @@ const CalendarPage: React.FC = () => {
                       </div>
                     </CardTitle>
                     
-                    {dayData.sessionCount > 0 && (
+                    <div className="flex items-center gap-1">
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-4 w-4 p-0"
-                        onClick={() => toggleDayExpanded(dateString)}
+                        className="h-4 w-4 p-0 opacity-60 hover:opacity-100"
+                        onClick={() => handleAddSession(dayData.date)}
+                        title="Add session"
                       >
-                        {isExpanded ? (
-                          <ChevronUp className="w-2.5 h-2.5" />
-                        ) : (
-                          <ChevronDown className="w-2.5 h-2.5" />
-                        )}
+                        <Plus className="w-2.5 h-2.5" />
                       </Button>
-                    )}
+                      {dayData.sessionCount === 1 && dayData.sessions[0].end && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-4 w-4 p-0 opacity-60 hover:opacity-100"
+                          onClick={() => handleEditSession(dayData.sessions[0])}
+                          title="Edit session"
+                        >
+                          <Edit className="w-2.5 h-2.5" />
+                        </Button>
+                      )}
+                      {dayData.sessionCount > 1 && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-4 w-4 p-0 opacity-60 hover:opacity-100"
+                          onClick={() => {
+                            setSelectedDate(dayData.date);
+                            setViewMode('timeline');
+                          }}
+                          title="View in timeline"
+                        >
+                          <BarChart3 className="w-2.5 h-2.5" />
+                        </Button>
+                      )}
+                      {dayData.sessionCount > 0 && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-4 w-4 p-0"
+                          onClick={() => toggleDayExpanded(dateString)}
+                        >
+                          {isExpanded ? (
+                            <ChevronUp className="w-2.5 h-2.5" />
+                          ) : (
+                            <ChevronDown className="w-2.5 h-2.5" />
+                          )}
+                        </Button>
+                      )}
+                    </div>
                   </div>
                   
                   {/* Daily Metrics */}
@@ -264,13 +402,27 @@ const CalendarPage: React.FC = () => {
                       {/* Client Summary Pills */}
                       <div className="space-y-0.5">
                         {Object.entries(dayData.clientGroups).map(([client, data]) => (
-                          <div key={client} className="flex items-center justify-between text-xs">
+                          <div 
+                            key={client} 
+                            className="flex items-center justify-between text-xs hover:bg-muted/50 rounded px-1 py-0.5 cursor-pointer transition-colors"
+                            onClick={() => {
+                              if (!isExpanded) {
+                                toggleDayExpanded(dateString);
+                              }
+                            }}
+                            title={`${data.count} session${data.count > 1 ? 's' : ''} • Click to ${isExpanded ? 'view' : 'expand'} details`}
+                          >
                             <Badge variant="outline" className={cn("text-xs truncate max-w-20 px-1 py-0", getClientColor(client))}>
                               {client}
                             </Badge>
-                            <span className="text-xs text-muted-foreground">
-                              {formatHours(data.totalMs / (1000 * 60 * 60))}
-                            </span>
+                            <div className="flex items-center gap-1">
+                              <span className="text-xs text-muted-foreground">
+                                {formatHours(data.totalMs / (1000 * 60 * 60))}
+                              </span>
+                              <span className="text-xs text-muted-foreground/70">
+                                ({data.count})
+                              </span>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -302,19 +454,47 @@ const CalendarPage: React.FC = () => {
                               
                               return (
                                 <div key={session.id} className={cn(
-                                  "text-xs space-y-0.5 p-2 rounded-md border",
+                                  "text-xs space-y-0.5 p-2 rounded-md border group hover:shadow-sm transition-all cursor-pointer",
                                   clientColorClasses
                                 )}>
                                   <div className="flex items-center justify-between">
                                     <span className="font-mono opacity-70">
                                       {startTime}-{endTime}
                                     </span>
-                                    <span className="font-medium">{duration}</span>
+                                    <div className="flex items-center gap-1">
+                                      <span className="font-medium">{duration}</span>
+                                      {session.end && ( // Only show edit for completed sessions
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="h-4 w-4 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleEditSession(session);
+                                          }}
+                                        >
+                                          <Edit className="w-2.5 h-2.5" />
+                                        </Button>
+                                      )}
+                                    </div>
                                   </div>
-                                  <div className="truncate font-medium">{project}</div>
-                                  <div className="truncate opacity-80">{taskName}</div>
+                                  <div 
+                                    className="truncate font-medium cursor-pointer"
+                                    onClick={() => session.end && handleEditSession(session)}
+                                  >
+                                    {project}
+                                  </div>
+                                  <div 
+                                    className="truncate opacity-80 cursor-pointer"
+                                    onClick={() => session.end && handleEditSession(session)}
+                                  >
+                                    {taskName}
+                                  </div>
                                   {session.notes && (
-                                    <div className="truncate opacity-70 italic">
+                                    <div 
+                                      className="truncate opacity-70 italic cursor-pointer"
+                                      onClick={() => session.end && handleEditSession(session)}
+                                    >
                                       {session.notes}
                                     </div>
                                   )}
@@ -329,7 +509,65 @@ const CalendarPage: React.FC = () => {
               </Card>
             );
           })}
-        </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="timeline">
+            {/* Date Selector for Timeline */}
+            <div className="mb-6">
+              <div className="flex items-center gap-4">
+                <h3 className="text-lg font-semibold">Select Date:</h3>
+                <div className="flex items-center gap-2">
+                  {weekDays.map((day) => (
+                    <Button
+                      key={day.toISOString()}
+                      variant={selectedDate.toDateString() === day.toDateString() ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setSelectedDate(day)}
+                    >
+                      {day.toLocaleDateString("en-US", { weekday: "short", day: "numeric" })}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Timeline View */}
+            <TimelineView
+              date={selectedDate}
+              sessions={selectedDateSessions}
+              onSessionEdit={handleEditSession}
+              onTimeAdjustment={handleTimeAdjustment}
+              onAddSession={handleAddSession}
+            />
+          </TabsContent>
+        </Tabs>
+
+        {/* Edit Session Modal */}
+        <EditSessionModal
+          session={editingSession}
+          open={!!editingSession}
+          onClose={() => setEditingSession(null)}
+          onSave={handleSaveSession}
+          onViewHistory={handleViewHistory}
+        />
+
+        {/* Session History Modal */}
+        <SessionHistoryModal
+          sessionId={historySessionId}
+          open={!!historySessionId}
+          onClose={() => setHistorySessionId(null)}
+          getSessionEditHistory={getSessionEditHistory}
+        />
+
+        {/* Add Session Modal */}
+        <AddSessionModal
+          open={!!addingSession}
+          onClose={() => setAddingSession(null)}
+          onSave={handleSaveNewSession}
+          prefilledDate={addingSession?.date}
+          prefilledTime={addingSession?.prefilledTime}
+        />
       </div>
     </div>
   );

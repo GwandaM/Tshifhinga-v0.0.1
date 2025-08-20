@@ -339,6 +339,7 @@ class DatabaseService {
           } else {
             console.log('Sessions table ready');
             this.addBillableColumnIfMissing();
+            this.addSessionEditingFeatures();
             checkCompletion();
           }
         });
@@ -550,6 +551,122 @@ class DatabaseService {
         if (callback) callback();
       }
     });
+  }
+
+  private addSessionEditingFeatures(): void {
+    if (!this.db) return;
+
+    // Add missing columns to sessions table
+    this.db.all("PRAGMA table_info(sessions)", (err, columns: any[]) => {
+      if (err) {
+        console.error('Error checking sessions table structure:', err);
+        return;
+      }
+
+      const columnNames = columns.map(col => col.name);
+      
+      // Add edited_at column
+      if (!columnNames.includes('edited_at')) {
+        this.db.run("ALTER TABLE sessions ADD COLUMN edited_at INTEGER", (alterErr) => {
+          if (alterErr) {
+            console.error('Error adding edited_at column:', alterErr);
+          } else {
+            console.log('Successfully added edited_at column');
+          }
+        });
+      }
+
+      // Add edit_count column
+      if (!columnNames.includes('edit_count')) {
+        this.db.run("ALTER TABLE sessions ADD COLUMN edit_count INTEGER DEFAULT 0", (alterErr) => {
+          if (alterErr) {
+            console.error('Error adding edit_count column:', alterErr);
+          } else {
+            console.log('Successfully added edit_count column');
+          }
+        });
+      }
+
+      // Add original_active_ms column
+      if (!columnNames.includes('original_active_ms')) {
+        this.db.run("ALTER TABLE sessions ADD COLUMN original_active_ms INTEGER", (alterErr) => {
+          if (alterErr) {
+            console.error('Error adding original_active_ms column:', alterErr);
+          } else {
+            console.log('Successfully added original_active_ms column');
+          }
+        });
+      }
+
+      // Add is_manually_created column
+      if (!columnNames.includes('is_manually_created')) {
+        this.db.run("ALTER TABLE sessions ADD COLUMN is_manually_created BOOLEAN DEFAULT 0", (alterErr) => {
+          if (alterErr) {
+            console.error('Error adding is_manually_created column:', alterErr);
+          } else {
+            console.log('Successfully added is_manually_created column');
+          }
+        });
+      }
+    });
+
+    // Create session_edits table
+    const createSessionEditsTable = `
+      CREATE TABLE IF NOT EXISTS session_edits (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        user_id INTEGER NOT NULL,
+        edit_type TEXT NOT NULL CHECK (edit_type IN ('time_adjustment', 'details_change', 'split', 'merge')),
+        original_start_time INTEGER,
+        original_end_time INTEGER,
+        new_start_time INTEGER,
+        new_end_time INTEGER,
+        original_active_ms INTEGER,
+        new_active_ms INTEGER,
+        changes_json TEXT,
+        edit_reason TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `;
+
+    this.db.run(createSessionEditsTable, (err: any) => {
+      if (err) {
+        console.error('Error creating session_edits table:', err);
+      } else {
+        console.log('Session edits table ready');
+      }
+    });
+
+    // Create user_reliability_metrics table
+    const createUserReliabilityTable = `
+      CREATE TABLE IF NOT EXISTS user_reliability_metrics (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        week_start_date TEXT NOT NULL,
+        tracked_time_ms INTEGER NOT NULL DEFAULT 0,
+        edited_time_ms INTEGER NOT NULL DEFAULT 0,
+        total_time_ms INTEGER NOT NULL DEFAULT 0,
+        reliability_rate REAL NOT NULL DEFAULT 100.0,
+        sessions_count INTEGER NOT NULL DEFAULT 0,
+        edits_count INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        UNIQUE(user_id, week_start_date)
+      )
+    `;
+
+    this.db.run(createUserReliabilityTable, (err: any) => {
+      if (err) {
+        console.error('Error creating user_reliability_metrics table:', err);
+      } else {
+        console.log('User reliability metrics table ready');
+      }
+    });
+
+    console.log('Session editing features migration completed');
   }
 
   private createIndexes(): void {
@@ -848,6 +965,51 @@ class DatabaseService {
     });
   }
 
+  async addSession(session: SessionRecord): Promise<void> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      console.log('Adding manually created session:', session);
+
+      const sql = `
+        INSERT INTO sessions (
+          id, client, project, task, start_time, end_time,
+          active_ms, paused_ms, notes, created_at, is_billable, user_id,
+          original_active_ms, is_manually_created
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `;
+
+      this.db.run(sql, [
+        session.id,
+        session.client || session.task?.client,
+        session.project || session.task?.project,
+        (typeof session.task === 'string' ? session.task : session.task?.task) || session.project,
+        session.start,
+        session.end || null,
+        session.activeMs,
+        session.pausedMs,
+        session.notes || null,
+        session.createdAt,
+        session.isBillable !== false ? 1 : 0,
+        session.userId || null,
+        session.activeMs, // original_active_ms same as activeMs for new sessions
+        session.isManuallyCreated ? 1 : 0,
+      ], function(err: any) {
+        if (err) {
+          console.error('Error adding session:', err);
+          reject(err);
+        } else {
+          console.log('Session added successfully');
+          resolve();
+        }
+      });
+    });
+  }
+
   async updateSession(id: string, updates: Partial<Omit<SessionRecord, 'id' | 'createdAt'>>): Promise<void> {
     try {
       await this.ensureReady();
@@ -929,6 +1091,344 @@ class DatabaseService {
           reject(err);
         } else {
           resolve();
+        }
+      });
+    });
+  }
+
+  // Session Editing Methods
+  async editSession(sessionId: string, userId: number, updates: {
+    startTime?: number;
+    endTime?: number;
+    client?: string;
+    project?: string;
+    task?: string;
+    notes?: string;
+  }, editReason: string): Promise<void> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      this.db.serialize(() => {
+        // First, get the original session data
+        this.db.get(
+          'SELECT * FROM sessions WHERE id = ?',
+          [sessionId],
+          (err, originalSession: any) => {
+            if (err) {
+              reject(err);
+              return;
+            }
+            if (!originalSession) {
+              reject(new Error('Session not found'));
+              return;
+            }
+
+            // Calculate new active time if times are being changed
+            let newActiveMs = originalSession.active_ms;
+            if (updates.startTime !== undefined || updates.endTime !== undefined) {
+              const newStart = updates.startTime || originalSession.start_time;
+              const newEnd = updates.endTime || originalSession.end_time;
+              if (newEnd) {
+                newActiveMs = newEnd - newStart;
+              }
+            }
+
+            // Prepare session update
+            const sessionUpdates: any = {};
+            if (updates.startTime !== undefined) sessionUpdates.start_time = updates.startTime;
+            if (updates.endTime !== undefined) sessionUpdates.end_time = updates.endTime;
+            if (updates.client !== undefined) sessionUpdates.client = updates.client;
+            if (updates.project !== undefined) sessionUpdates.project = updates.project;
+            if (updates.task !== undefined) sessionUpdates.task = updates.task;
+            if (updates.notes !== undefined) sessionUpdates.notes = updates.notes;
+            if (newActiveMs !== originalSession.active_ms) sessionUpdates.active_ms = newActiveMs;
+            
+            sessionUpdates.edited_at = Date.now();
+            sessionUpdates.edit_count = (originalSession.edit_count || 0) + 1;
+            
+            // Set original_active_ms if not already set
+            if (!originalSession.original_active_ms) {
+              sessionUpdates.original_active_ms = originalSession.active_ms;
+            }
+
+            // Update session
+            const setParts = Object.keys(sessionUpdates).map(key => `${key} = ?`);
+            const values = Object.values(sessionUpdates);
+            values.push(sessionId);
+
+            this.db.run(
+              `UPDATE sessions SET ${setParts.join(', ')} WHERE id = ?`,
+              values,
+              (err) => {
+                if (err) {
+                  reject(err);
+                  return;
+                }
+
+                // Create audit record
+                const editId = `edit_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                const editType = (updates.startTime !== undefined || updates.endTime !== undefined) 
+                  ? 'time_adjustment' : 'details_change';
+
+                const changesJson = JSON.stringify({
+                  client: { old: originalSession.client, new: updates.client },
+                  project: { old: originalSession.project, new: updates.project },
+                  task: { old: originalSession.task, new: updates.task },
+                  notes: { old: originalSession.notes, new: updates.notes }
+                });
+
+                this.db.run(
+                  `INSERT INTO session_edits (
+                    id, session_id, user_id, edit_type, 
+                    original_start_time, original_end_time, 
+                    new_start_time, new_end_time,
+                    original_active_ms, new_active_ms,
+                    changes_json, edit_reason, created_at
+                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  [
+                    editId, sessionId, userId, editType,
+                    originalSession.start_time, originalSession.end_time,
+                    updates.startTime || originalSession.start_time,
+                    updates.endTime || originalSession.end_time,
+                    originalSession.active_ms, newActiveMs,
+                    changesJson, editReason, Date.now()
+                  ],
+                  (err) => {
+                    if (err) {
+                      reject(err);
+                      return;
+                    }
+
+                    // Update reliability metrics
+                    this.updateUserReliabilityMetrics(userId)
+                      .then(() => resolve())
+                      .catch(reject);
+                  }
+                );
+              }
+            );
+          }
+        );
+      });
+    });
+  }
+
+  async getSessionEditHistory(sessionId: string): Promise<any[]> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      const sql = `
+        SELECT 
+          se.*, 
+          u.username
+        FROM session_edits se
+        LEFT JOIN users u ON se.user_id = u.id
+        WHERE se.session_id = ?
+        ORDER BY se.created_at DESC
+      `;
+      this.db.all(sql, [sessionId], (err, rows: any[]) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(rows);
+        }
+      });
+    });
+  }
+
+  async validateSessionEdit(sessionId: string, updates: {
+    startTime?: number;
+    endTime?: number;
+  }, userId: number): Promise<{ isValid: boolean; errors: string[] }> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    const errors: string[] = [];
+
+    return new Promise((resolve, reject) => {
+      // Get the session being edited
+      this.db.get('SELECT * FROM sessions WHERE id = ?', [sessionId], (err, session: any) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        if (!session) {
+          errors.push('Session not found');
+          resolve({ isValid: false, errors });
+          return;
+        }
+
+        const newStart = updates.startTime || session.start_time;
+        const newEnd = updates.endTime || session.end_time;
+
+        // Validate time logic
+        if (newEnd && newStart >= newEnd) {
+          errors.push('Start time must be before end time');
+        }
+
+        if (newEnd && newEnd > Date.now()) {
+          errors.push('End time cannot be in the future');
+        }
+
+        const duration = newEnd ? newEnd - newStart : 0;
+        if (duration > 24 * 60 * 60 * 1000) {
+          errors.push('Session duration cannot exceed 24 hours');
+        }
+
+        if (duration < 60 * 1000) {
+          errors.push('Session duration must be at least 1 minute');
+        }
+
+        // Check for overlapping sessions
+        if (updates.startTime !== undefined || updates.endTime !== undefined) {
+          const sql = `
+            SELECT COUNT(*) as count 
+            FROM sessions 
+            WHERE user_id = ? 
+              AND id != ? 
+              AND start_time < ? 
+              AND (end_time IS NULL OR end_time > ?)
+          `;
+          this.db.get(sql, [userId, sessionId, newEnd || newStart + 1000, newStart], (err, result: any) => {
+            if (err) {
+              reject(err);
+              return;
+            }
+            if (result.count > 0) {
+              errors.push('Session times overlap with existing sessions');
+            }
+            resolve({ isValid: errors.length === 0, errors });
+          });
+        } else {
+          resolve({ isValid: errors.length === 0, errors });
+        }
+      });
+    });
+  }
+
+  async updateUserReliabilityMetrics(userId: number): Promise<void> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      // Get the start of the current week (Monday)
+      const now = new Date();
+      const day = now.getDay();
+      const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+      const weekStart = new Date(now.setDate(diff));
+      weekStart.setHours(0, 0, 0, 0);
+      const weekStartString = weekStart.toISOString().split('T')[0];
+
+      // Calculate metrics for the current week
+      const weekStartMs = weekStart.getTime();
+      const weekEndMs = weekStartMs + (7 * 24 * 60 * 60 * 1000);
+
+      this.db.get(`
+        SELECT 
+          COUNT(*) as session_count,
+          COUNT(CASE WHEN edit_count > 0 THEN 1 END) as edited_session_count,
+          SUM(original_active_ms) as total_tracked_ms,
+          SUM(active_ms) as total_current_ms
+        FROM sessions 
+        WHERE user_id = ? 
+          AND start_time >= ? 
+          AND start_time < ?
+      `, [userId, weekStartMs, weekEndMs], (err, result: any) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+
+        const totalTrackedMs = result.total_tracked_ms || 0;
+        const totalCurrentMs = result.total_current_ms || 0;
+        const totalEditedMs = totalCurrentMs - totalTrackedMs;
+        const reliabilityRate = totalCurrentMs > 0 ? totalTrackedMs / totalCurrentMs : 1.0;
+
+        // Insert or update reliability metrics
+        this.db.run(`
+          INSERT OR REPLACE INTO user_reliability_metrics (
+            user_id, week_start_date, tracked_time_ms, edited_time_ms, total_time_ms,
+            reliability_rate, sessions_count, edits_count,
+            created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+          userId, weekStartString, totalTrackedMs, totalEditedMs, totalCurrentMs,
+          reliabilityRate, result.session_count, result.edited_session_count,
+          Date.now(), Date.now()
+        ], (err) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve();
+          }
+        });
+      });
+    });
+  }
+
+  async getUserReliabilityRate(userId: number, weekStart: Date): Promise<number> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    const weekStartString = weekStart.toISOString().split('T')[0];
+    
+    return new Promise((resolve, reject) => {
+      this.db.get(
+        'SELECT reliability_rate FROM user_reliability_metrics WHERE user_id = ? AND week_start_date = ?',
+        [userId, weekStartString],
+        (err, row: any) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve(row ? row.reliability_rate : 1.0);
+          }
+        }
+      );
+    });
+  }
+
+  async getAllUserReliabilityMetrics(): Promise<any[]> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      const sql = `
+        SELECT 
+          urm.*,
+          u.username,
+          u.name,
+          u.surname,
+          u.team,
+          u.region
+        FROM user_reliability_metrics urm
+        LEFT JOIN users u ON urm.user_id = u.id
+        ORDER BY urm.week_start_date DESC, u.username
+      `;
+      this.db.all(sql, (err, rows: any[]) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(rows);
         }
       });
     });

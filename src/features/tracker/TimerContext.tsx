@@ -12,7 +12,9 @@ export interface TaskRef {
 
 export interface SessionRecord {
   id: string;
-  task: TaskRef;
+  task?: TaskRef;
+  client?: string;
+  project?: string;
   start: number;
   end?: number;
   activeMs: number;
@@ -20,6 +22,8 @@ export interface SessionRecord {
   notes?: string;
   createdAt: number;
   isBillable?: boolean;
+  userId?: number;
+  isManuallyCreated?: boolean;
 }
 
 interface TimerState {
@@ -52,6 +56,30 @@ interface TimerContextValue extends TimerState {
   refreshSessions: () => void;
   handleIdleChoice: (choice: IdleChoice, nextTask?: TaskRef) => void;
   idleDialog: IdleDialogState;
+  // Session editing methods
+  editSession: (sessionId: string, updates: {
+    startTime?: Date;
+    endTime?: Date;
+    client?: string;
+    project?: string;
+    task?: string;
+    notes?: string;
+  }, editReason: string) => Promise<void>;
+  validateSessionEdit: (sessionId: string, updates: {
+    startTime?: Date;
+    endTime?: Date;
+  }) => Promise<{ isValid: boolean; errors: string[] }>;
+  getSessionEditHistory: (sessionId: string) => Promise<any[]>;
+  getUserReliabilityRate: (weekStart: Date) => Promise<number>;
+  // Session creation method
+  addSession: (sessionData: {
+    startTime: Date;
+    endTime: Date;
+    client: string;
+    project: string;
+    task: string;
+    notes?: string;
+  }) => Promise<void>;
 }
 
 const TimerContext = createContext<TimerContextValue | undefined>(undefined);
@@ -302,6 +330,118 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [sessionsToday]
   );
 
+  // Session editing methods
+  const editSession = useCallback(async (sessionId: string, updates: {
+    startTime?: Date;
+    endTime?: Date;
+    client?: string;
+    project?: string;
+    task?: string;
+    notes?: string;
+  }, editReason: string) => {
+    if (!user) {
+      throw new Error('User must be logged in to edit sessions');
+    }
+
+    const dbUpdates: any = {};
+    if (updates.startTime !== undefined) dbUpdates.startTime = updates.startTime.getTime();
+    if (updates.endTime !== undefined) dbUpdates.endTime = updates.endTime.getTime();
+    if (updates.client !== undefined) dbUpdates.client = updates.client;
+    if (updates.project !== undefined) dbUpdates.project = updates.project;
+    if (updates.task !== undefined) dbUpdates.task = updates.task;
+    if (updates.notes !== undefined) dbUpdates.notes = updates.notes;
+
+    await electronDB.editSession(sessionId, user.id, dbUpdates, editReason);
+    
+    // Refresh sessions to show updated data
+    refreshSessions();
+    
+    // Update reliability metrics
+    await electronDB.updateUserReliabilityMetrics(user.id);
+  }, [user, refreshSessions]);
+
+  const validateSessionEdit = useCallback(async (sessionId: string, updates: {
+    startTime?: Date;
+    endTime?: Date;
+  }) => {
+    if (!user) {
+      throw new Error('User must be logged in to validate sessions');
+    }
+
+    const dbUpdates: any = {};
+    if (updates.startTime !== undefined) dbUpdates.startTime = updates.startTime.getTime();
+    if (updates.endTime !== undefined) dbUpdates.endTime = updates.endTime.getTime();
+
+    return await electronDB.validateSessionEdit(sessionId, dbUpdates, user.id);
+  }, [user]);
+
+  const getSessionEditHistory = useCallback(async (sessionId: string) => {
+    return await electronDB.getSessionEditHistory(sessionId);
+  }, []);
+
+  const getUserReliabilityRate = useCallback(async (weekStart: Date) => {
+    if (!user) {
+      throw new Error('User must be logged in to get reliability rate');
+    }
+    return await electronDB.getUserReliabilityRate(user.id, weekStart);
+  }, [user]);
+
+  const addSession = useCallback(async (sessionData: {
+    startTime: Date;
+    endTime: Date;
+    client: string;
+    project: string;
+    task: string;
+    notes?: string;
+  }) => {
+    if (!user) {
+      throw new Error('User must be logged in to create sessions');
+    }
+
+    try {
+      // Create a session object similar to how normal sessions are created
+      const sessionId = crypto.randomUUID();
+      const now = Date.now();
+      const activeMs = sessionData.endTime.getTime() - sessionData.startTime.getTime();
+
+      const newSession: SessionRecord = {
+        id: sessionId,
+        client: sessionData.client,
+        project: sessionData.project,
+        task: {
+          client: sessionData.client,
+          project: sessionData.project,
+          task: sessionData.task,
+        },
+        start: sessionData.startTime.getTime(),
+        end: sessionData.endTime.getTime(),
+        activeMs,
+        pausedMs: 0,
+        notes: sessionData.notes || '',
+        createdAt: now,
+        isBillable: true,
+        userId: user.id,
+        isManuallyCreated: true, // Mark as manually created
+      };
+
+      // Save the session to the database
+      await electronDB.addSession(newSession);
+      
+      // Refresh sessions to show the new one
+      await refreshSessions();
+      
+      // Update reliability metrics
+      const weekStart = new Date(sessionData.startTime);
+      weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1); // Monday
+      weekStart.setHours(0, 0, 0, 0);
+      await electronDB.updateUserReliabilityMetrics(user.id, weekStart);
+
+    } catch (error) {
+      console.error('Failed to create session:', error);
+      throw error;
+    }
+  }, [user, refreshSessions]);
+
   const value: TimerContextValue = {
     ...timerState,
     notes,
@@ -318,6 +458,13 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     refreshSessions,
     handleIdleChoice,
     idleDialog,
+    // Session editing methods
+    editSession,
+    validateSessionEdit,
+    getSessionEditHistory,
+    getUserReliabilityRate,
+    // Session creation method
+    addSession,
   };
 
   return <TimerContext.Provider value={value}>{children}</TimerContext.Provider>;

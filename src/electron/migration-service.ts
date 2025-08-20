@@ -425,6 +425,73 @@ class MigrationService {
           `DROP VIEW IF EXISTS view_client_profitability`,
           `DROP VIEW IF EXISTS view_user_daily_metrics`
         ]
+      },
+      {
+        version: 10,
+        name: 'add_session_editing_tables',
+        description: 'Add tables for session editing, audit trails, and reliability tracking',
+        up: [
+          // Session edits audit table
+          `CREATE TABLE IF NOT EXISTS session_edits (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            user_id INTEGER NOT NULL,
+            edit_type TEXT NOT NULL CHECK (edit_type IN ('time_adjustment', 'details_change', 'split', 'merge')),
+            original_start_time INTEGER,
+            original_end_time INTEGER,
+            new_start_time INTEGER,
+            new_end_time INTEGER,
+            original_active_ms INTEGER,
+            new_active_ms INTEGER,
+            changes_json TEXT,
+            edit_reason TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+          )`,
+          
+          // User reliability metrics table
+          `CREATE TABLE IF NOT EXISTS user_reliability_metrics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            week_start_date TEXT NOT NULL,
+            total_tracked_ms INTEGER DEFAULT 0,
+            total_edited_ms INTEGER DEFAULT 0,
+            reliability_rate REAL DEFAULT 1.0,
+            session_count INTEGER DEFAULT 0,
+            edited_session_count INTEGER DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            UNIQUE(user_id, week_start_date)
+          )`,
+          
+          // Add new columns to sessions table for edit tracking
+          `ALTER TABLE sessions ADD COLUMN edited_at INTEGER`,
+          `ALTER TABLE sessions ADD COLUMN edit_count INTEGER DEFAULT 0`,
+          `ALTER TABLE sessions ADD COLUMN original_active_ms INTEGER`,
+          `ALTER TABLE sessions ADD COLUMN is_manually_created BOOLEAN DEFAULT 0`,
+          
+          // Create indexes for performance
+          `CREATE INDEX IF NOT EXISTS idx_session_edits_session_id ON session_edits(session_id)`,
+          `CREATE INDEX IF NOT EXISTS idx_session_edits_user_id ON session_edits(user_id)`,
+          `CREATE INDEX IF NOT EXISTS idx_session_edits_created_at ON session_edits(created_at)`,
+          `CREATE INDEX IF NOT EXISTS idx_reliability_metrics_user_week ON user_reliability_metrics(user_id, week_start_date)`,
+          `CREATE INDEX IF NOT EXISTS idx_sessions_edited_at ON sessions(edited_at)`,
+          
+          // Update existing sessions to set original_active_ms
+          `UPDATE sessions SET original_active_ms = active_ms WHERE original_active_ms IS NULL`
+        ],
+        down: [
+          `DROP INDEX IF EXISTS idx_sessions_edited_at`,
+          `DROP INDEX IF EXISTS idx_reliability_metrics_user_week`,
+          `DROP INDEX IF EXISTS idx_session_edits_created_at`,
+          `DROP INDEX IF EXISTS idx_session_edits_user_id`,
+          `DROP INDEX IF EXISTS idx_session_edits_session_id`,
+          `DROP TABLE IF EXISTS user_reliability_metrics`,
+          `DROP TABLE IF EXISTS session_edits`
+          // Note: Cannot drop columns in SQLite, so we leave the new columns
+        ]
       }
     ];
   }

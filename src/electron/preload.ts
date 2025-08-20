@@ -7,11 +7,25 @@ const electronAPI = {
     getAllSessions: () => ipcRenderer.invoke('db:getAllSessions'),
     getUserSessions: (userId) => ipcRenderer.invoke('db:getUserSessions', userId),
     insertSession: (session) => ipcRenderer.invoke('db:insertSession', session),
+    addSession: (session) => ipcRenderer.invoke('db:addSession', session),
     updateSession: (id, updates) => ipcRenderer.invoke('db:updateSession', id, updates),
     deleteSession: (id) => ipcRenderer.invoke('db:deleteSession', id),
     getSessionsByDateRange: (startDate, endDate) => 
       ipcRenderer.invoke('db:getSessionsByDateRange', startDate, endDate),
     getClientSummary: () => ipcRenderer.invoke('db:getClientSummary'),
+    // Session editing operations
+    editSession: (sessionId, userId, updates, editReason) => 
+      ipcRenderer.invoke('db:editSession', sessionId, userId, updates, editReason),
+    getSessionEditHistory: (sessionId) => 
+      ipcRenderer.invoke('db:getSessionEditHistory', sessionId),
+    validateSessionEdit: (sessionId, updates, userId) => 
+      ipcRenderer.invoke('db:validateSessionEdit', sessionId, updates, userId),
+    getUserReliabilityRate: (userId, weekStart) => 
+      ipcRenderer.invoke('db:getUserReliabilityRate', userId, weekStart),
+    getAllUserReliabilityMetrics: () => 
+      ipcRenderer.invoke('db:getAllUserReliabilityMetrics'),
+    updateUserReliabilityMetrics: (userId) => 
+      ipcRenderer.invoke('db:updateUserReliabilityMetrics', userId),
     migrateFromLocalStorage: (data) => ipcRenderer.invoke('db:migrateFromLocalStorage', data),
     exportToCSV: () => ipcRenderer.invoke('db:exportToCSV'),
     exportToJSON: () => ipcRenderer.invoke('db:exportToJSON'),
