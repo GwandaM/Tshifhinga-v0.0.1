@@ -135,6 +135,7 @@ export const ClientBreakdownChart: React.FC<ClientBreakdownChartProps> = ({
                 dataKey="value"
                 onClick={handleClientClick}
                 style={{ cursor: 'pointer' }}
+                label={false}
               >
                 {chartData.map((entry, index) => (
                   <Cell 

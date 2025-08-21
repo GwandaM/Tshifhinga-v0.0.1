@@ -19,7 +19,6 @@ import { Minimize2 } from "lucide-react";
 import Index from "./pages/Index";
 import Dashboard from "./pages/Dashboard";
 import CalendarPage from "./pages/Calendar";
-import Reports from "./pages/Reports";
 import FinancialAnalytics from "./pages/analytics/FinancialAnalytics";
 import TeamAnalytics from "./pages/analytics/TeamAnalytics";
 import UserManagement from "./pages/admin/UserManagement";
@@ -170,7 +169,6 @@ const App = () => {
                           <Route path="/" element={<Index />} />
                           <Route path="/dashboard" element={<Dashboard />} />
                           <Route path="/calendar" element={<CalendarPage />} />
-                          <Route path="/reports" element={<Reports />} />
                           <Route path="/analytics/financial" element={<FinancialAnalytics />} />
                           <Route 
                             path="/analytics/team" 

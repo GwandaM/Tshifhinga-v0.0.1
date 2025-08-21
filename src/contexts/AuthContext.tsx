@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 
 interface User {
   id: number;
@@ -110,7 +110,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     localStorage.removeItem('auth_token');
   };
 
-  const hasPermission = (action: string, resource?: any): boolean => {
+  const hasPermission = useCallback((action: string, resource?: any): boolean => {
     if (!user) return false;
     
     // Admin users have all permissions
@@ -137,7 +137,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       default:
         return false;
     }
-  };
+  }, [user]);
 
   const isAuthenticated = !!user && !!token;
 
