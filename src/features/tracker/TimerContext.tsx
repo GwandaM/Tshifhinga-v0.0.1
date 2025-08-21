@@ -84,7 +84,7 @@ interface TimerContextValue extends TimerState {
 
 const TimerContext = createContext<TimerContextValue | undefined>(undefined);
 
-const IDLE_THRESHOLD_MS = 60 * 1000; // 60 seconds
+const IDLE_THRESHOLD_MS = 15 * 1000; // 15 seconds
 
 export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, hasPermission, token } = useAuth();
@@ -125,35 +125,56 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     // --- Idle Detection Logic ---
     const handleIdle = (timestamp: number) => {
+      console.log(`[Idle] handleIdle called - timestamp: ${timestamp}, timer status: ${timerStateRef.current.status}`);
       if (timerStateRef.current.status === 'running') {
         console.log(`[Idle] Idle state detected at ${new Date(timestamp).toLocaleTimeString()}`);
         wasRunningBeforeIdleRef.current = true;
         idleStartRef.current = timestamp;
         window.electronAPI.timer.pause(); // Pause the timer to stop accumulation
+      } else {
+        console.log(`[Idle] Timer not running, ignoring idle event`);
       }
     };
 
     const handleActive = (timestamp: number) => {
+      console.log(`[Idle] handleActive called - timestamp: ${timestamp}, wasRunningBefore: ${wasRunningBeforeIdleRef.current}, idleStart: ${idleStartRef.current}`);
       if (wasRunningBeforeIdleRef.current && idleStartRef.current) {
         const idleMs = timestamp - idleStartRef.current;
-        console.log(`[Idle] Active state resumed. Idle for ${Math.round(idleMs / 1000)}s`);
+        console.log(`[Idle] Active state resumed. Idle for ${Math.round(idleMs / 1000)}s, threshold: ${IDLE_THRESHOLD_MS}ms`);
 
         if (idleMs > IDLE_THRESHOLD_MS) {
+          console.log(`[Idle] Showing idle dialog - idle time exceeded threshold`);
           setIdleDialog({ open: true, idleMs });
         } else {
+          console.log(`[Idle] Idle time under threshold, resuming timer`);
           // If idle time is less than threshold, just resume the timer
           window.electronAPI.timer.resume();
           // Reset idle state tracking since we are not showing a dialog
           idleStartRef.current = null;
           wasRunningBeforeIdleRef.current = false;
         }
+      } else {
+        console.log(`[Idle] No active idle state to handle`);
       }
     };
 
-    const removeSuspendListener = window.electronAPI.powerMonitor.onSystemSuspend((_, ts) => handleIdle(ts));
-    const removeLockListener = window.electronAPI.powerMonitor.onScreenLock((_, ts) => handleIdle(ts));
-    const removeResumeListener = window.electronAPI.powerMonitor.onSystemResume((_, data) => handleActive(data.wakeTime));
-    const removeUnlockListener = window.electronAPI.powerMonitor.onScreenUnlock((_, ts) => handleActive(ts));
+    console.log('[Idle] Setting up power monitor event listeners');
+    const removeSuspendListener = window.electronAPI.powerMonitor.onSystemSuspend((_, ts) => {
+      console.log('[Idle] System suspend event received:', ts);
+      handleIdle(ts);
+    });
+    const removeLockListener = window.electronAPI.powerMonitor.onScreenLock((_, ts) => {
+      console.log('[Idle] Screen lock event received:', ts);
+      handleIdle(ts);
+    });
+    const removeResumeListener = window.electronAPI.powerMonitor.onSystemResume((_, data) => {
+      console.log('[Idle] System resume event received:', data);
+      handleActive(data.wakeTime);
+    });
+    const removeUnlockListener = window.electronAPI.powerMonitor.onScreenUnlock((_, ts) => {
+      console.log('[Idle] Screen unlock event received:', ts);
+      handleActive(ts);
+    });
 
     // Initial load of sessions
     refreshSessions();
@@ -215,15 +236,22 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       userId: user?.id
     });
 
-    if (!idleStartRef.current || !timerState.task) {
-      console.error("[Idle] Cannot handle choice, idle start time or task is missing.", {
+    // Handle test scenarios where idleStartRef might be null
+    const isTestScenario = !idleStartRef.current;
+    
+    if (!timerState.task) {
+      console.error("[Idle] Cannot handle choice, no active task.", {
         idleStart: idleStartRef.current,
         task: timerState.task
       });
       return closeDialog();
     }
 
-    const idleMs = Date.now() - idleStartRef.current;
+    // For test scenarios, use the idle time from the dialog state
+    // For real scenarios, calculate from the idle start time
+    const idleMs = isTestScenario 
+      ? idleDialog.idleMs 
+      : Date.now() - idleStartRef.current;
     const originalTask = timerState.task;
 
     console.log(`[Idle] Processing choice with idle time: ${Math.round(idleMs / 1000)}s`);
@@ -232,25 +260,40 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       switch (choice) {
         case 'continue':
           console.log("[Idle] Continuing with original task - keeping idle time");
-          // Add the idle time to the timer (as if it kept running) then resume
-          await window.electronAPI.timer.adjustTime(idleMs);
-          window.electronAPI.timer.resume();
+          if (isTestScenario) {
+            console.log("[Idle] Test scenario - just resuming timer");
+            window.electronAPI.timer.resume();
+          } else {
+            // Add the idle time to the timer (as if it kept running) then resume
+            await window.electronAPI.timer.adjustTime(idleMs);
+            window.electronAPI.timer.resume();
+          }
           break;
 
         case 'break':
           console.log("[Idle] Break chosen - time discarded");
-          // Stop the current timer at the beginning of the idle period (discard idle time)
-          await window.electronAPI.timer.adjustTime(-idleMs);
-          await window.electronAPI.timer.stop({ notes: "Stopped due to user idle.", token });
+          if (isTestScenario) {
+            console.log("[Idle] Test scenario - stopping timer");
+            await window.electronAPI.timer.stop({ notes: "Stopped due to user idle (test).", token });
+          } else {
+            // Stop the current timer at the beginning of the idle period (discard idle time)
+            await window.electronAPI.timer.adjustTime(-idleMs);
+            await window.electronAPI.timer.stop({ notes: "Stopped due to user idle.", token });
+          }
           break;
 
         case 'meeting':
         case 'admin':
           console.log(`[Idle] Creating ${choice} session for idle period`);
           
-          // First, stop the current timer at the beginning of the idle period
-          await window.electronAPI.timer.adjustTime(-idleMs);
-          await window.electronAPI.timer.stop({ notes: "Stopped due to user idle.", token });
+          if (isTestScenario) {
+            console.log("[Idle] Test scenario - stopping timer and starting new");
+            await window.electronAPI.timer.stop({ notes: `Stopped for ${choice} (test).`, token });
+          } else {
+            // First, stop the current timer at the beginning of the idle period
+            await window.electronAPI.timer.adjustTime(-idleMs);
+            await window.electronAPI.timer.stop({ notes: "Stopped due to user idle.", token });
+          }
           
           // Create a new session for the idle period
           const meetingTask: TaskRef = {
@@ -259,14 +302,17 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             task: "General",
           };
           
+          const sessionStart = isTestScenario ? Date.now() - idleMs : idleStartRef.current;
           const sessionData = {
             id: `session-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`,
             task: meetingTask,
-            start: idleStartRef.current,
+            client: meetingTask.client,
+            project: meetingTask.project,
+            start: sessionStart,
             end: Date.now(),
             activeMs: idleMs,
             pausedMs: 0,
-            notes: "Logged from idle time.",
+            notes: isTestScenario ? "Logged from test." : "Logged from idle time.",
             createdAt: Date.now(),
             isBillable: false,
             userId: user?.id,
@@ -289,9 +335,15 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
         case 'switch':
           console.log("[Idle] Switching to new task");
-          // Stop the current timer at the beginning of the idle period (discard idle time)
-          await window.electronAPI.timer.adjustTime(-idleMs);
-          await window.electronAPI.timer.stop({ notes: "Stopped due to user idle.", token });
+          
+          if (isTestScenario) {
+            console.log("[Idle] Test scenario - stopping timer");
+            await window.electronAPI.timer.stop({ notes: "Stopped for task switch (test).", token });
+          } else {
+            // Stop the current timer at the beginning of the idle period (discard idle time)
+            await window.electronAPI.timer.adjustTime(-idleMs);
+            await window.electronAPI.timer.stop({ notes: "Stopped due to user idle.", token });
+          }
           
           if (nextTask) {
             console.log("[Idle] Starting timer for new task:", nextTask);
@@ -442,6 +494,19 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [user, refreshSessions]);
 
+  // Debug function to manually test idle dialog
+  const debugTestIdleDialog = useCallback(() => {
+    console.log('[Debug] Manually triggering idle dialog for testing');
+    setIdleDialog({ open: true, idleMs: 120000 }); // 2 minutes
+  }, []);
+
+  // Expose debug function to window for testing
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development') {
+      (window as any).debugTestIdleDialog = debugTestIdleDialog;
+    }
+  }, [debugTestIdleDialog]);
+
   const value: TimerContextValue = {
     ...timerState,
     notes,
@@ -465,7 +530,9 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     getUserReliabilityRate,
     // Session creation method
     addSession,
-  };
+    // Debug function for testing
+    debugTestIdleDialog,
+  } as any;
 
   return <TimerContext.Provider value={value}>{children}</TimerContext.Provider>;
 };

@@ -179,6 +179,22 @@ function Content() {
         </section>
 
         <IdleDialog open={idleDialog.open} idleMs={idleDialog.idleMs} onClose={handleIdleChoice} />
+        
+        {/* Test button for idle dialog - development only */}
+        {process.env.NODE_ENV === 'development' && (
+          <div className="fixed bottom-4 right-4">
+            <button 
+              onClick={() => {
+                console.log('[Debug] Testing idle dialog manually');
+                (window as any).debugTestIdleDialog?.();
+              }}
+              className="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded text-xs"
+            >
+              Test Idle Dialog
+            </button>
+          </div>
+        )}
+        
       </main>
     </>
   );

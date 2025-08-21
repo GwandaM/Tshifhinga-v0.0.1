@@ -3,22 +3,17 @@ import { useTimer } from "@/features/tracker/TimerContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ChevronLeft, ChevronRight, Clock, ChevronDown, ChevronUp, Edit, BarChart3, Grid, Plus } from "lucide-react";
-import { SessionTimeline } from "@/components/ui/session-timeline";
+import { ChevronLeft, ChevronRight, Clock, ChevronDown, ChevronUp, Edit, Plus } from "lucide-react";
 import { EditSessionModal } from "@/components/ui/edit-session-modal";
 import { SessionHistoryModal } from "@/components/ui/session-history-modal";
 import { AddSessionModal } from "@/components/ui/add-session-modal";
-import { TimelineView } from "@/components/ui/timeline-view";
 import { cn } from "@/lib/utils";
 import type { SessionRecord } from "@/features/tracker/TimerContext";
 
 const CalendarPage: React.FC = () => {
-  const { sessions, editSession, getSessionEditHistory, validateSessionEdit, addSession } = useTimer();
+  const { sessions, editSession, getSessionEditHistory, addSession } = useTimer();
   const [currentWeek, setCurrentWeek] = useState<Date>(new Date());
   const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set());
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
-  const [viewMode, setViewMode] = useState<'grid' | 'timeline'>('grid');
   
   // Edit session modal state
   const [editingSession, setEditingSession] = useState<SessionRecord | null>(null);
@@ -170,17 +165,6 @@ const CalendarPage: React.FC = () => {
     setHistorySessionId(sessionId);
   };
 
-  const handleTimeAdjustment = async (sessionId: string, updates: { startTime: Date; endTime: Date }) => {
-    try {
-      await editSession(sessionId, {
-        startTime: updates.startTime,
-        endTime: updates.endTime,
-      }, 'Timeline drag adjustment');
-    } catch (error) {
-      console.error('Failed to adjust session time:', error);
-      throw error;
-    }
-  };
 
   const handleAddSession = (date: Date, prefilledTime?: { start: string; end: string }) => {
     setAddingSession({
@@ -206,18 +190,6 @@ const CalendarPage: React.FC = () => {
     }
   };
 
-  // Get sessions for selected date (for timeline view)
-  const selectedDateSessions = useMemo(() => {
-    const dayStart = new Date(selectedDate);
-    dayStart.setHours(0, 0, 0, 0);
-    const dayEnd = new Date(selectedDate);
-    dayEnd.setHours(23, 59, 59, 999);
-
-    return sessions.filter(session => {
-      const sessionDate = new Date(session.start);
-      return sessionDate >= dayStart && sessionDate <= dayEnd;
-    });
-  }, [sessions, selectedDate]);
 
   return (
     <div className="min-h-screen bg-background p-6">
@@ -267,22 +239,8 @@ const CalendarPage: React.FC = () => {
           </div>
         </div>
 
-        {/* View Mode Tabs */}
-        <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as 'grid' | 'timeline')} className="w-full">
-          <TabsList className="grid w-full grid-cols-2 max-w-md mb-6">
-            <TabsTrigger value="grid" className="flex items-center gap-2">
-              <Grid className="w-4 h-4" />
-              Weekly Grid
-            </TabsTrigger>
-            <TabsTrigger value="timeline" className="flex items-center gap-2">
-              <BarChart3 className="w-4 h-4" />
-              Daily Timeline
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="grid">
-            {/* Weekly grid */}
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+        {/* Weekly Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
           {dailyData.map((dayData, index) => {
             const dateString = dayData.date.toISOString();
             const isExpanded = expandedDays.has(dateString);
@@ -330,20 +288,6 @@ const CalendarPage: React.FC = () => {
                           title="Edit session"
                         >
                           <Edit className="w-2.5 h-2.5" />
-                        </Button>
-                      )}
-                      {dayData.sessionCount > 1 && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-4 w-4 p-0 opacity-60 hover:opacity-100"
-                          onClick={() => {
-                            setSelectedDate(dayData.date);
-                            setViewMode('timeline');
-                          }}
-                          title="View in timeline"
-                        >
-                          <BarChart3 className="w-2.5 h-2.5" />
                         </Button>
                       )}
                       {dayData.sessionCount > 0 && (
@@ -509,39 +453,7 @@ const CalendarPage: React.FC = () => {
               </Card>
             );
           })}
-            </div>
-          </TabsContent>
-
-          <TabsContent value="timeline">
-            {/* Date Selector for Timeline */}
-            <div className="mb-6">
-              <div className="flex items-center gap-4">
-                <h3 className="text-lg font-semibold">Select Date:</h3>
-                <div className="flex items-center gap-2">
-                  {weekDays.map((day) => (
-                    <Button
-                      key={day.toISOString()}
-                      variant={selectedDate.toDateString() === day.toDateString() ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => setSelectedDate(day)}
-                    >
-                      {day.toLocaleDateString("en-US", { weekday: "short", day: "numeric" })}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Timeline View */}
-            <TimelineView
-              date={selectedDate}
-              sessions={selectedDateSessions}
-              onSessionEdit={handleEditSession}
-              onTimeAdjustment={handleTimeAdjustment}
-              onAddSession={handleAddSession}
-            />
-          </TabsContent>
-        </Tabs>
+        </div>
 
         {/* Edit Session Modal */}
         <EditSessionModal
