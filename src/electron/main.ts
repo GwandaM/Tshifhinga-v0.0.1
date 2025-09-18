@@ -1297,6 +1297,48 @@ ipcMain.handle('auth:deactivate-user', async (_, userId) => {
   return await authService.deactivateUser(userId);
 });
 
+// Enhanced permission handlers for Phase 1
+ipcMain.handle('permissions:get-user-project-details', async (_, userId) => {
+  return await dbService.getUserProjectPermissionDetails(userId);
+});
+
+ipcMain.handle('permissions:set-user-project-permission', async (_, userId, projectId, permissionLevel, grantedBy) => {
+  return await dbService.setUserProjectPermission(userId, projectId, permissionLevel, grantedBy);
+});
+
+ipcMain.handle('permissions:has-user-project-permission', async (_, userId, projectId, requiredLevel) => {
+  return await dbService.hasUserProjectPermission(userId, projectId, requiredLevel);
+});
+
+ipcMain.handle('permissions:get-all-user-project-permissions', async () => {
+  return await dbService.getAllUserProjectPermissions();
+});
+
+ipcMain.handle('permissions:bulk-set-permissions', async (_, assignments, grantedBy) => {
+  return await dbService.bulkSetUserProjectPermissions(assignments, grantedBy);
+});
+
+ipcMain.handle('permissions:remove-user-project-permission', async (_, userId, projectId) => {
+  return await dbService.removeUserProjectPermission(userId, projectId);
+});
+
+// Permission Template handlers
+ipcMain.handle('templates:create-permission-template', async (_, name, description, templateData, createdBy) => {
+  return await dbService.createPermissionTemplate(name, description, templateData, createdBy);
+});
+
+ipcMain.handle('templates:get-all-permission-templates', async () => {
+  return await dbService.getAllPermissionTemplates();
+});
+
+ipcMain.handle('templates:apply-permission-template', async (_, templateId, userIds, grantedBy) => {
+  return await dbService.applyPermissionTemplate(templateId, userIds, grantedBy);
+});
+
+ipcMain.handle('templates:delete-permission-template', async (_, id) => {
+  return await dbService.deletePermissionTemplate(id);
+});
+
 }).catch((error) => {
   console.error('Failed to initialize application:', error);
   electronApp.quit();

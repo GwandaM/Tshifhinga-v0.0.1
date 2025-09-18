@@ -1,5 +1,5 @@
 import { NavLink, useLocation } from "react-router-dom";
-import { Clock, CalendarDays, BarChart3, Menu, Users, Shield, Activity, LayoutDashboard, DollarSign, TrendingUp } from "lucide-react";
+import { Clock, CalendarDays, Menu, Users, Shield, Activity, LayoutDashboard } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -22,10 +22,6 @@ const items = [
   { title: "Timesheet", url: "/calendar", icon: CalendarDays },
 ];
 
-const analyticsItems = [
-  { title: "Financial", url: "/analytics/financial", icon: DollarSign },
-  { title: "Team Performance", url: "/analytics/team", icon: TrendingUp, permission: "view_all_sessions" },
-];
 
 const adminItems = [
   { title: "User Management", url: "/admin/users", icon: Users, permission: "manage_users" },
@@ -47,9 +43,6 @@ export function AppSidebar() {
     hasPermission(item.permission) // Check specific permission for each item
   );
 
-  const visibleAnalyticsItems = analyticsItems.filter(item => 
-    !item.permission || hasPermission(item.permission)
-  );
 
   return (
     <Sidebar collapsible="icon">
@@ -83,28 +76,6 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {/* Analytics Section */}
-        {visibleAnalyticsItems.length > 0 && (
-          <SidebarGroup>
-            <div className="flex items-center justify-between mb-2 px-2">
-              {!collapsed && <SidebarGroupLabel className="text-xs">Analytics</SidebarGroupLabel>}
-            </div>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {visibleAnalyticsItems.map((item) => (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton asChild tooltip={item.title}>
-                      <NavLink to={item.url} end className={getNavCls}>
-                        <item.icon />
-                        {!collapsed && <span>{item.title}</span>}
-                      </NavLink>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        )}
 
         {/* Admin Section */}
         {visibleAdminItems.length > 0 && (

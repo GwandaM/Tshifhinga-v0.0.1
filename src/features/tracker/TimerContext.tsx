@@ -190,9 +190,58 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
   }, [refreshSessions]);
 
-  const start = useCallback((t: TaskRef) => {
+  const start = useCallback(async (t: TaskRef) => {
+    // Check permissions before starting timer (for non-admin users)
+    if (user && user.role !== 'admin' && user.role !== 'director') {
+      try {
+        // Get the project ID from hierarchy to check permissions
+        const hierarchy = await electronDB.getHierarchy();
+        let projectId: number | null = null;
+
+        // Find the project ID in the hierarchy
+        for (const client of hierarchy) {
+          if (client.name === t.client) {
+            const project = client.projects?.find((p: any) => p.name === t.project);
+            if (project) {
+              projectId = project.id;
+              break;
+            }
+          }
+        }
+
+        if (projectId) {
+          const hasPermission = await electronDB.hasUserProjectPermission(
+            user.id,
+            projectId,
+            'track_time'
+          );
+
+          if (!hasPermission) {
+            // User doesn't have permission to track time on this project
+            console.error('Permission denied: User cannot track time on this project', {
+              user: user.username,
+              project: `${t.client} / ${t.project}`
+            });
+
+            // Could show a toast notification here if needed
+            if ((window as any).electronAPI?.showErrorDialog) {
+              (window as any).electronAPI.showErrorDialog(
+                'Permission Denied',
+                `You don't have permission to track time on project "${t.client} / ${t.project}". Please contact your administrator.`
+              );
+            }
+            return;
+          }
+        }
+      } catch (error) {
+        console.error('Error checking project permission before starting timer:', error);
+        // On error, allow the timer to start for backward compatibility
+      }
+    }
+
+    // If we get here, user has permission or is admin/director
     window.electronAPI?.timer.start(t);
-  }, []);
+  }, [user]);
 
   const pause = useCallback(() => {
     window.electronAPI?.timer.pause();

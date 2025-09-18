@@ -35,6 +35,7 @@ import {
 import { ClientsTab } from './components/ClientsTab';
 import { ProjectsTab } from './components/ProjectsTab';
 import { TasksTab } from './components/TasksTab';
+import { UserProjectPermissionMatrix } from '@/components/UserProjectPermissionMatrix';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
@@ -403,20 +404,7 @@ export default function ProjectManagement() {
             </TabsContent>
             
             <TabsContent value="permissions" className="space-y-4">
-              <div className="text-center py-8">
-                <Shield className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                <h3 className="text-lg font-semibold mb-2">User Project Permissions</h3>
-                <p className="text-muted-foreground mb-4">
-                  Advanced permission management interface for controlling user access to specific projects.
-                </p>
-                <div className="space-y-2">
-                  <Badge variant="outline">Phase 4 Feature</Badge>
-                  <p className="text-xs text-muted-foreground">
-                    This will include: User-Project Assignment Matrix, Bulk Permission Changes, 
-                    Role-based Access Control, and Permission History
-                  </p>
-                </div>
-              </div>
+              <UserProjectPermissionMatrix />
             </TabsContent>
           </Tabs>
         </CardContent>

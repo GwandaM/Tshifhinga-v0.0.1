@@ -19,8 +19,6 @@ import { Minimize2 } from "lucide-react";
 import Index from "./pages/Index";
 import Dashboard from "./pages/Dashboard";
 import CalendarPage from "./pages/Calendar";
-import FinancialAnalytics from "./pages/analytics/FinancialAnalytics";
-import TeamAnalytics from "./pages/analytics/TeamAnalytics";
 import UserManagement from "./pages/admin/UserManagement";
 import ActivityMonitoring from "./pages/admin/ActivityMonitoring";
 import ProjectManagement from "./pages/admin/ProjectManagement";
@@ -169,15 +167,6 @@ const App = () => {
                           <Route path="/" element={<Index />} />
                           <Route path="/dashboard" element={<Dashboard />} />
                           <Route path="/calendar" element={<CalendarPage />} />
-                          <Route path="/analytics/financial" element={<FinancialAnalytics />} />
-                          <Route 
-                            path="/analytics/team" 
-                            element={
-                              <ProtectedRoute requiredPermission="view_all_sessions">
-                                <TeamAnalytics />
-                              </ProtectedRoute>
-                            } 
-                          />
                           <Route 
                             path="/admin/users" 
                             element={

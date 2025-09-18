@@ -5,9 +5,9 @@ const { existsSync, mkdirSync, chmodSync } = require('fs');
 
 interface SessionRecord {
   id: string;
-  client: string;
-  project: string;
-  task: string;
+  client?: string;
+  project?: string;
+  task?: string | { client: string; project: string; task: string };
   start: number;
   end?: number;
   activeMs: number;
@@ -16,6 +16,7 @@ interface SessionRecord {
   createdAt: number;
   isBillable?: boolean;
   userId?: number;
+  isManuallyCreated?: boolean;
 }
 
 interface UserRecord {
@@ -41,8 +42,22 @@ interface ProjectPermissionRecord {
   id: number;
   userId: number;
   projectId: number;
-  canTrackTime: boolean;
+  permissionLevel: 'view' | 'track_time' | 'edit' | 'admin';
+  canTrackTime: boolean; // Keep for backward compatibility
+  grantedBy?: number;
   createdAt: number;
+  revokedAt?: number;
+  isActive: boolean;
+}
+
+interface PermissionTemplate {
+  id: number;
+  name: string;
+  description?: string;
+  templateData: Array<{ projectId: number; permissionLevel: 'view' | 'track_time' | 'edit' | 'admin' }>;
+  createdBy?: number;
+  createdAt: number;
+  isActive: boolean;
 }
 
 class DatabaseService {
@@ -296,6 +311,36 @@ class DatabaseService {
       )
     `;
 
+    const createPermissionTemplatesTable = `
+      CREATE TABLE IF NOT EXISTS permission_templates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT,
+        template_data TEXT NOT NULL,
+        created_by INTEGER,
+        created_at INTEGER NOT NULL,
+        is_active BOOLEAN DEFAULT 1,
+        FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+      )
+    `;
+
+    const createPermissionHistoryTable = `
+      CREATE TABLE IF NOT EXISTS permission_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        project_id INTEGER NOT NULL,
+        action TEXT NOT NULL CHECK (action IN ('granted', 'revoked', 'updated')),
+        old_permission_level TEXT,
+        new_permission_level TEXT,
+        granted_by INTEGER,
+        created_at INTEGER NOT NULL,
+        reason TEXT,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+        FOREIGN KEY (granted_by) REFERENCES users(id) ON DELETE SET NULL
+      )
+    `;
+
     const createBillableRatesTable = `
       CREATE TABLE IF NOT EXISTS billable_rates_by_job_level (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -424,6 +469,26 @@ class DatabaseService {
             handleError(err);
           } else {
             console.log('Job levels table ready');
+            checkCompletion();
+          }
+        });
+
+        this.db.run(createPermissionTemplatesTable, (err: any) => {
+          if (err) {
+            console.error('Error creating permission templates table:', err);
+            handleError(err);
+          } else {
+            console.log('Permission templates table ready');
+            checkCompletion();
+          }
+        });
+
+        this.db.run(createPermissionHistoryTable, (err: any) => {
+          if (err) {
+            console.error('Error creating permission history table:', err);
+            handleError(err);
+          } else {
+            console.log('Permission history table ready');
             checkCompletion();
           }
         });
@@ -663,6 +728,81 @@ class DatabaseService {
         console.error('Error creating user_reliability_metrics table:', err);
       } else {
         console.log('User reliability metrics table ready');
+      }
+    });
+
+    // Enhanced permissions migration
+    this.db.all(`PRAGMA table_info(user_project_permissions)`, (err: any, rows: any[]) => {
+      if (err) {
+        console.error('Error checking user_project_permissions table structure:', err);
+        return;
+      }
+
+      if (!rows || !Array.isArray(rows)) {
+        console.error('Invalid table_info response for user_project_permissions:', rows);
+        return;
+      }
+
+      const columnNames = rows.map(row => row.name);
+
+      // Add permission_level column
+      if (!columnNames.includes('permission_level')) {
+        this.db.run("ALTER TABLE user_project_permissions ADD COLUMN permission_level TEXT DEFAULT 'track_time'", (alterErr: any) => {
+          if (alterErr) {
+            console.error('Error adding permission_level column:', alterErr);
+          } else {
+            console.log('Successfully added permission_level column');
+          }
+        });
+      }
+
+      // Add granted_by column
+      if (!columnNames.includes('granted_by')) {
+        this.db.run("ALTER TABLE user_project_permissions ADD COLUMN granted_by INTEGER REFERENCES users(id)", (alterErr: any) => {
+          if (alterErr) {
+            console.error('Error adding granted_by column:', alterErr);
+          } else {
+            console.log('Successfully added granted_by column');
+          }
+        });
+      }
+
+      // Add revoked_at column
+      if (!columnNames.includes('revoked_at')) {
+        this.db.run("ALTER TABLE user_project_permissions ADD COLUMN revoked_at INTEGER", (alterErr: any) => {
+          if (alterErr) {
+            console.error('Error adding revoked_at column:', alterErr);
+          } else {
+            console.log('Successfully added revoked_at column');
+          }
+        });
+      }
+
+      // Add is_active column
+      if (!columnNames.includes('is_active')) {
+        this.db.run("ALTER TABLE user_project_permissions ADD COLUMN is_active BOOLEAN DEFAULT 1", (alterErr: any) => {
+          if (alterErr) {
+            console.error('Error adding is_active column:', alterErr);
+          } else {
+            console.log('Successfully added is_active column');
+
+            // Update existing records to set permission_level based on can_track_time
+            this.db.run(`
+              UPDATE user_project_permissions
+              SET permission_level = CASE
+                WHEN can_track_time = 1 THEN 'track_time'
+                ELSE 'view'
+              END
+              WHERE permission_level IS NULL OR permission_level = ''
+            `, (updateErr: any) => {
+              if (updateErr) {
+                console.error('Error updating existing permission levels:', updateErr);
+              } else {
+                console.log('Successfully updated existing permission levels');
+              }
+            });
+          }
+        });
       }
     });
 
@@ -983,11 +1123,15 @@ class DatabaseService {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
 
+      const taskClient = session.client || (typeof session.task === 'object' ? session.task?.client : '');
+      const taskProject = session.project || (typeof session.task === 'object' ? session.task?.project : '');
+      const taskName = typeof session.task === 'string' ? session.task : (typeof session.task === 'object' ? session.task?.task : session.project);
+
       this.db.run(sql, [
         session.id,
-        session.client || session.task?.client,
-        session.project || session.task?.project,
-        (typeof session.task === 'string' ? session.task : session.task?.task) || session.project,
+        taskClient,
+        taskProject,
+        taskName,
         session.start,
         session.end || null,
         session.activeMs,
@@ -1735,32 +1879,41 @@ class DatabaseService {
           rows.forEach(row => {
             if (!clientsMap.has(row.client_id)) {
               clientsMap.set(row.client_id, {
+                id: row.client_id,
                 name: row.client_name,
                 projects: new Map()
               });
             }
-            
+
             const client = clientsMap.get(row.client_id);
-            
-            if (row.project_id && !client.projects.has(row.project_id)) {
-              client.projects.set(row.project_id, {
-                name: row.project_name,
-                tasks: []
-              });
-            }
-            
-            if (row.task_id && row.project_id) {
-              const project = client.projects.get(row.project_id);
-              if (project && !project.tasks.includes(row.task_name)) {
-                project.tasks.push(row.task_name);
+
+            if (row.project_id) {
+              if (!client.projects.has(row.project_id)) {
+                client.projects.set(row.project_id, {
+                  id: row.project_id,
+                  name: row.project_name,
+                  tasks: []
+                });
+              }
+
+              if (row.task_id) {
+                const project = client.projects.get(row.project_id);
+                if (project && !project.tasks.includes(row.task_name)) {
+                  project.tasks.push(row.task_name);
+                }
               }
             }
           });
 
-          // Convert Maps to arrays
+          // Convert Maps to arrays with IDs so downstream code has stable keys
           const hierarchy = Array.from(clientsMap.values()).map(client => ({
+            id: client.id,
             name: client.name,
-            projects: Array.from(client.projects.values())
+            projects: Array.from(client.projects.values()).map((project: any) => ({
+              id: project.id,
+              name: project.name,
+              tasks: project.tasks
+            }))
           }));
 
           resolve(hierarchy);
@@ -1955,6 +2108,238 @@ class DatabaseService {
         } else {
           resolve();
         }
+      });
+    });
+  }
+
+  // Enhanced permission methods for Phase 1
+  async getUserProjectPermissionDetails(userId: number): Promise<ProjectPermissionRecord[]> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      const sql = `
+        SELECT
+          upp.id,
+          upp.user_id as userId,
+          upp.project_id as projectId,
+          upp.permission_level as permissionLevel,
+          upp.can_track_time as canTrackTime,
+          upp.granted_by as grantedBy,
+          upp.created_at as createdAt,
+          upp.revoked_at as revokedAt,
+          upp.is_active as isActive,
+          p.name as projectName,
+          c.name as clientName
+        FROM user_project_permissions upp
+        LEFT JOIN projects p ON upp.project_id = p.id
+        LEFT JOIN clients c ON p.client_id = c.id
+        WHERE upp.user_id = ? AND upp.is_active = 1
+        ORDER BY c.name, p.name
+      `;
+      this.db.all(sql, [userId], (err, rows: any[]) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(rows);
+        }
+      });
+    });
+  }
+
+  async setUserProjectPermission(
+    userId: number,
+    projectId: number,
+    permissionLevel: 'view' | 'track_time' | 'edit' | 'admin',
+    grantedBy?: number,
+    reason?: string
+  ): Promise<void> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      // First get the existing permission to log the change
+      const checkExistingSql = 'SELECT permission_level FROM user_project_permissions WHERE user_id = ? AND project_id = ? AND is_active = 1';
+
+      this.db.get(checkExistingSql, [userId, projectId], (checkErr: any, existingRow: any) => {
+        const oldPermissionLevel = existingRow?.permission_level || null;
+        const action = oldPermissionLevel ? 'updated' : 'granted';
+
+        const canTrackTime = ['track_time', 'edit', 'admin'].includes(permissionLevel);
+        const sql = `
+          INSERT OR REPLACE INTO user_project_permissions
+          (user_id, project_id, permission_level, can_track_time, granted_by, created_at, is_active)
+          VALUES (?, ?, ?, ?, ?, ?, 1)
+        `;
+
+        this.db.run(sql, [userId, projectId, permissionLevel, canTrackTime, grantedBy, Date.now()], (err: any) => {
+          if (err) {
+            reject(err);
+            return;
+          }
+
+          // Log the permission change
+          const logSql = `
+            INSERT INTO permission_history
+            (user_id, project_id, action, old_permission_level, new_permission_level, granted_by, created_at, reason)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `;
+
+          this.db.run(logSql, [
+            userId, projectId, action, oldPermissionLevel, permissionLevel, grantedBy, Date.now(), reason
+          ], (logErr: any) => {
+            if (logErr) {
+              console.error('Error logging permission change:', logErr);
+              // Don't fail the main operation if logging fails
+            }
+            resolve();
+          });
+        });
+      });
+    });
+  }
+
+  async hasUserProjectPermission(
+    userId: number,
+    projectId: number,
+    requiredLevel: 'view' | 'track_time' | 'edit' | 'admin' = 'view'
+  ): Promise<boolean> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      const sql = `
+        SELECT permission_level, is_active
+        FROM user_project_permissions
+        WHERE user_id = ? AND project_id = ? AND is_active = 1
+      `;
+
+      this.db.get(sql, [userId, projectId], (err, row: any) => {
+        if (err) {
+          reject(err);
+        } else if (!row) {
+          resolve(false);
+        } else {
+          const userLevel = row.permission_level;
+          const levelHierarchy = { 'view': 0, 'track_time': 1, 'edit': 2, 'admin': 3 };
+          const userLevelValue = levelHierarchy[userLevel] || 0;
+          const requiredLevelValue = levelHierarchy[requiredLevel] || 0;
+          resolve(userLevelValue >= requiredLevelValue);
+        }
+      });
+    });
+  }
+
+  async getAllUserProjectPermissions(): Promise<Array<ProjectPermissionRecord & { username: string; projectName: string; clientName: string }>> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      const sql = `
+        SELECT
+          upp.id,
+          upp.user_id as userId,
+          upp.project_id as projectId,
+          upp.permission_level as permissionLevel,
+          upp.can_track_time as canTrackTime,
+          upp.granted_by as grantedBy,
+          upp.created_at as createdAt,
+          upp.revoked_at as revokedAt,
+          upp.is_active as isActive,
+          u.username,
+          p.name as projectName,
+          c.name as clientName
+        FROM user_project_permissions upp
+        LEFT JOIN users u ON upp.user_id = u.id
+        LEFT JOIN projects p ON upp.project_id = p.id
+        LEFT JOIN clients c ON p.client_id = c.id
+        WHERE upp.is_active = 1
+        ORDER BY u.username, c.name, p.name
+      `;
+      this.db.all(sql, [], (err, rows: any[]) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(rows);
+        }
+      });
+    });
+  }
+
+  async bulkSetUserProjectPermissions(
+    assignments: Array<{
+      userId: number;
+      projectId: number;
+      permissionLevel: 'view' | 'track_time' | 'edit' | 'admin';
+    }>,
+    grantedBy?: number
+  ): Promise<void> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      this.db.serialize(() => {
+        this.db.run('BEGIN TRANSACTION');
+
+        let completed = 0;
+        let hasError = false;
+
+        if (assignments.length === 0) {
+          this.db.run('COMMIT');
+          resolve();
+          return;
+        }
+
+        assignments.forEach((assignment) => {
+          const canTrackTime = ['track_time', 'edit', 'admin'].includes(assignment.permissionLevel);
+          const sql = `
+            INSERT OR REPLACE INTO user_project_permissions
+            (user_id, project_id, permission_level, can_track_time, granted_by, created_at, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, 1)
+          `;
+
+          this.db.run(sql, [
+            assignment.userId,
+            assignment.projectId,
+            assignment.permissionLevel,
+            canTrackTime,
+            grantedBy,
+            Date.now()
+          ], (err) => {
+            completed++;
+            if (err && !hasError) {
+              hasError = true;
+              this.db.run('ROLLBACK');
+              reject(err);
+              return;
+            }
+
+            if (completed === assignments.length && !hasError) {
+              this.db.run('COMMIT', (commitErr) => {
+                if (commitErr) {
+                  reject(commitErr);
+                } else {
+                  resolve();
+                }
+              });
+            }
+          });
+        });
       });
     });
   }
@@ -3275,6 +3660,233 @@ class DatabaseService {
     }
     
     console.log('Analytics tables and views created successfully');
+  }
+
+  // Permission Template methods
+  async createPermissionTemplate(
+    name: string,
+    description: string,
+    templateData: Array<{ projectId: number; permissionLevel: 'view' | 'track_time' | 'edit' | 'admin' }>,
+    createdBy?: number
+  ): Promise<number> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      const sql = `
+        INSERT INTO permission_templates (name, description, template_data, created_by, created_at, is_active)
+        VALUES (?, ?, ?, ?, ?, 1)
+      `;
+
+      this.db.run(sql, [
+        name,
+        description,
+        JSON.stringify(templateData),
+        createdBy,
+        Date.now()
+      ], function(err: any) {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(this.lastID);
+        }
+      });
+    });
+  }
+
+  async getAllPermissionTemplates(): Promise<PermissionTemplate[]> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      const sql = `
+        SELECT
+          id, name, description, template_data as templateData,
+          created_by as createdBy, created_at as createdAt, is_active as isActive
+        FROM permission_templates
+        WHERE is_active = 1
+        ORDER BY name
+      `;
+
+      this.db.all(sql, [], (err: any, rows: any[]) => {
+        if (err) {
+          reject(err);
+        } else {
+          const templates = rows.map(row => ({
+            ...row,
+            templateData: JSON.parse(row.templateData)
+          }));
+          resolve(templates);
+        }
+      });
+    });
+  }
+
+  async applyPermissionTemplate(templateId: number, userIds: number[], grantedBy?: number): Promise<void> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      // First get the template
+      const getTemplateSql = 'SELECT template_data FROM permission_templates WHERE id = ? AND is_active = 1';
+
+      this.db.get(getTemplateSql, [templateId], (err: any, template: any) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+
+        if (!template) {
+          reject(new Error('Template not found'));
+          return;
+        }
+
+        const templateData = JSON.parse(template.template_data);
+        const assignments: Array<{ userId: number; projectId: number; permissionLevel: 'view' | 'track_time' | 'edit' | 'admin' }> = [];
+
+        userIds.forEach(userId => {
+          templateData.forEach((item: any) => {
+            assignments.push({
+              userId,
+              projectId: item.projectId,
+              permissionLevel: item.permissionLevel
+            });
+          });
+        });
+
+        // Apply all assignments
+        this.bulkSetUserProjectPermissions(assignments, grantedBy)
+          .then(() => resolve())
+          .catch(reject);
+      });
+    });
+  }
+
+  async deletePermissionTemplate(id: number): Promise<void> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      const sql = 'UPDATE permission_templates SET is_active = 0 WHERE id = ?';
+      this.db.run(sql, [id], function(err: any) {
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
+      });
+    });
+  }
+
+  // Permission History methods
+  async getPermissionHistory(userId?: number, projectId?: number, limit: number = 100): Promise<any[]> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      let sql = `
+        SELECT
+          ph.id, ph.user_id as userId, ph.project_id as projectId,
+          ph.action, ph.old_permission_level as oldPermissionLevel,
+          ph.new_permission_level as newPermissionLevel,
+          ph.granted_by as grantedBy, ph.created_at as createdAt, ph.reason,
+          u.username, u.name as userName,
+          p.name as projectName, c.name as clientName,
+          gb.username as grantedByUsername, gb.name as grantedByName
+        FROM permission_history ph
+        LEFT JOIN users u ON ph.user_id = u.id
+        LEFT JOIN projects p ON ph.project_id = p.id
+        LEFT JOIN clients c ON p.client_id = c.id
+        LEFT JOIN users gb ON ph.granted_by = gb.id
+        WHERE 1=1
+      `;
+
+      const params: any[] = [];
+
+      if (userId) {
+        sql += ' AND ph.user_id = ?';
+        params.push(userId);
+      }
+
+      if (projectId) {
+        sql += ' AND ph.project_id = ?';
+        params.push(projectId);
+      }
+
+      sql += ' ORDER BY ph.created_at DESC LIMIT ?';
+      params.push(limit);
+
+      this.db.all(sql, params, (err: any, rows: any[]) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(rows);
+        }
+      });
+    });
+  }
+
+  // Enhanced remove method with audit logging
+  async removeUserProjectPermissionWithAudit(userId: number, projectId: number, removedBy?: number, reason?: string): Promise<void> {
+    try {
+      await this.ensureReady();
+    } catch (error) {
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      // First get the existing permission to log the change
+      const checkExistingSql = 'SELECT permission_level FROM user_project_permissions WHERE user_id = ? AND project_id = ? AND is_active = 1';
+
+      this.db.get(checkExistingSql, [userId, projectId], (checkErr: any, existingRow: any) => {
+        const oldPermissionLevel = existingRow?.permission_level || null;
+
+        // Remove the permission
+        const sql = 'DELETE FROM user_project_permissions WHERE user_id = ? AND project_id = ?';
+        this.db.run(sql, [userId, projectId], (err: any) => {
+          if (err) {
+            reject(err);
+            return;
+          }
+
+          // Log the permission removal if there was an existing permission
+          if (oldPermissionLevel) {
+            const logSql = `
+              INSERT INTO permission_history
+              (user_id, project_id, action, old_permission_level, new_permission_level, granted_by, created_at, reason)
+              VALUES (?, ?, 'revoked', ?, NULL, ?, ?, ?)
+            `;
+
+            this.db.run(logSql, [
+              userId, projectId, oldPermissionLevel, removedBy, Date.now(), reason
+            ], (logErr: any) => {
+              if (logErr) {
+                console.error('Error logging permission removal:', logErr);
+                // Don't fail the main operation if logging fails
+              }
+              resolve();
+            });
+          } else {
+            resolve();
+          }
+        });
+      });
+    });
   }
 }
 

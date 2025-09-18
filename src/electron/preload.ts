@@ -141,6 +141,28 @@ const electronAPI = {
     updateUserRole: (userId, role) => ipcRenderer.invoke('auth:update-user-role', userId, role),
     deactivateUser: (userId) => ipcRenderer.invoke('auth:deactivate-user', userId),
   },
+  // Enhanced permission operations for Phase 1
+  permissions: {
+    getUserProjectDetails: (userId) => ipcRenderer.invoke('permissions:get-user-project-details', userId),
+    setUserProjectPermission: (userId, projectId, permissionLevel, grantedBy) =>
+      ipcRenderer.invoke('permissions:set-user-project-permission', userId, projectId, permissionLevel, grantedBy),
+    hasUserProjectPermission: (userId, projectId, requiredLevel) =>
+      ipcRenderer.invoke('permissions:has-user-project-permission', userId, projectId, requiredLevel),
+    getAllUserProjectPermissions: () => ipcRenderer.invoke('permissions:get-all-user-project-permissions'),
+    bulkSetPermissions: (assignments, grantedBy) =>
+      ipcRenderer.invoke('permissions:bulk-set-permissions', assignments, grantedBy),
+    removeUserProjectPermission: (userId, projectId) =>
+      ipcRenderer.invoke('permissions:remove-user-project-permission', userId, projectId),
+  },
+  // Permission template operations
+  templates: {
+    createPermissionTemplate: (name, description, templateData, createdBy) =>
+      ipcRenderer.invoke('templates:create-permission-template', name, description, templateData, createdBy),
+    getAllPermissionTemplates: () => ipcRenderer.invoke('templates:get-all-permission-templates'),
+    applyPermissionTemplate: (templateId, userIds, grantedBy) =>
+      ipcRenderer.invoke('templates:apply-permission-template', templateId, userIds, grantedBy),
+    deletePermissionTemplate: (id) => ipcRenderer.invoke('templates:delete-permission-template', id),
+  },
 };
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);

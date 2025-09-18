@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Clock, RefreshCw, Users, Search } from 'lucide-react';
 import { electronDB } from '@/lib/electron-database';
+import { DateRangeControls, type DateRange, type Preset } from '@/features/tracker/components/DateRangeControls';
 
 interface User {
   id: number;
@@ -58,6 +59,34 @@ export function ActivityMonitoring() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<number | null>(null);
+  const [preset, setPreset] = useState<Preset>('week');
+  const [range, setRange] = useState<DateRange>({});
+
+  const startOfDay = (d: Date) => { const x = new Date(d); x.setHours(0,0,0,0); return x; };
+  const endOfDay = (d: Date) => { const x = new Date(d); x.setHours(23,59,59,999); return x; };
+  const startOfWeek = (d = new Date()) => { const x = new Date(d); const day = (x.getDay()+6)%7; x.setHours(0,0,0,0); x.setDate(x.getDate()-day); return x; };
+  const startOfMonth = (d = new Date()) => { const x = new Date(d.getFullYear(), d.getMonth(), 1); x.setHours(0,0,0,0); return x; };
+
+  const { from, to } = useMemo(() => {
+    if (preset === 'today') {
+      const n = new Date();
+      return { from: startOfDay(n), to: endOfDay(n) };
+    }
+    if (preset === 'week') {
+      const s = startOfWeek(new Date());
+      const e = new Date(s);
+      e.setDate(s.getDate() + 6);
+      return { from: s, to: endOfDay(e) };
+    }
+    if (preset === 'month') {
+      const s = startOfMonth(new Date());
+      const e = new Date(s.getFullYear(), s.getMonth() + 1, 0);
+      return { from: s, to: endOfDay(e) };
+    }
+    const f = range.from ? startOfDay(range.from) : undefined;
+    const t = range.to ? endOfDay(range.to) : range.from ? endOfDay(range.from) : undefined;
+    return { from: f, to: t };
+  }, [preset, range]);
 
   // Check if user has admin permissions
   if (!hasPermission('view_all_sessions')) {
@@ -83,16 +112,14 @@ export function ActivityMonitoring() {
   }, []);
 
   const refreshSessions = useCallback(async () => {
+    if (!from || !to) return;
     setIsLoading(true);
     try {
-      let sessionData: SessionRecord[] = [];
-      
-      if (selectedUserId === 'all') {
-        // Admin refresh - get all sessions
-        sessionData = await electronDB.getAllSessions();
-      } else {
-        // Get sessions for specific user
-        sessionData = await electronDB.getUserSessions(parseInt(selectedUserId));
+      let sessionData: SessionRecord[] = await electronDB.getSessionsByDateRange(from!, to!);
+
+      if (selectedUserId !== 'all') {
+        const targetId = parseInt(selectedUserId, 10);
+        sessionData = sessionData.filter(session => session.userId === targetId);
       }
 
       // Enhance sessions with username
@@ -111,7 +138,11 @@ export function ActivityMonitoring() {
     } finally {
       setIsLoading(false);
     }
-  }, [selectedUserId, users]);
+  }, [selectedUserId, users, from, to]);
+
+  useEffect(() => {
+    refreshSessions();
+  }, [refreshSessions]);
 
   // Filter sessions based on search query
   const filteredSessions = sessions.filter(session => {
@@ -147,7 +178,7 @@ export function ActivityMonitoring() {
           )}
           <Button 
             onClick={refreshSessions} 
-            disabled={isLoading}
+            disabled={isLoading || !from || !to}
             className="flex items-center space-x-2"
           >
             <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
@@ -155,6 +186,13 @@ export function ActivityMonitoring() {
           </Button>
         </div>
       </div>
+
+      <DateRangeControls
+        preset={preset}
+        range={range}
+        onPresetChange={setPreset}
+        onRangeChange={setRange}
+      />
 
       {/* Statistics Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

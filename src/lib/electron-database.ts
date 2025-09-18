@@ -285,6 +285,99 @@ class ElectronDatabaseService {
     }
     return await window.electronAPI.database.updateUserReliabilityMetrics(userId);
   }
+
+  // Enhanced permission methods for Phase 1
+  async getUserProjectPermissionDetails(userId: number): Promise<any[]> {
+    if (!this.isElectron()) {
+      throw new Error('Not running in Electron environment');
+    }
+    return await window.electronAPI.permissions.getUserProjectDetails(userId);
+  }
+
+  async setUserProjectPermission(
+    userId: number,
+    projectId: number,
+    permissionLevel: 'view' | 'track_time' | 'edit' | 'admin',
+    grantedBy?: number
+  ): Promise<void> {
+    if (!this.isElectron()) {
+      throw new Error('Not running in Electron environment');
+    }
+    return await window.electronAPI.permissions.setUserProjectPermission(userId, projectId, permissionLevel, grantedBy);
+  }
+
+  async hasUserProjectPermission(
+    userId: number,
+    projectId: number,
+    requiredLevel: 'view' | 'track_time' | 'edit' | 'admin' = 'view'
+  ): Promise<boolean> {
+    if (!this.isElectron()) {
+      throw new Error('Not running in Electron environment');
+    }
+    return await window.electronAPI.permissions.hasUserProjectPermission(userId, projectId, requiredLevel);
+  }
+
+  async getAllUserProjectPermissions(): Promise<any[]> {
+    if (!this.isElectron()) {
+      throw new Error('Not running in Electron environment');
+    }
+    return await window.electronAPI.permissions.getAllUserProjectPermissions();
+  }
+
+  async bulkSetUserProjectPermissions(
+    assignments: Array<{
+      userId: number;
+      projectId: number;
+      permissionLevel: 'view' | 'track_time' | 'edit' | 'admin';
+    }>,
+    grantedBy?: number
+  ): Promise<void> {
+    if (!this.isElectron()) {
+      throw new Error('Not running in Electron environment');
+    }
+    return await window.electronAPI.permissions.bulkSetPermissions(assignments, grantedBy);
+  }
+
+  async removeUserProjectPermission(userId: number, projectId: number): Promise<void> {
+    if (!this.isElectron()) {
+      throw new Error('Not running in Electron environment');
+    }
+    return await window.electronAPI.permissions.removeUserProjectPermission(userId, projectId);
+  }
+
+  // Permission Template methods
+  async createPermissionTemplate(
+    name: string,
+    description: string,
+    templateData: Array<{ projectId: number; permissionLevel: 'view' | 'track_time' | 'edit' | 'admin' }>,
+    createdBy?: number
+  ): Promise<number> {
+    if (!this.isElectron()) {
+      throw new Error('Not running in Electron environment');
+    }
+    return await window.electronAPI.templates.createPermissionTemplate(name, description, templateData, createdBy);
+  }
+
+  async getAllPermissionTemplates(): Promise<any[]> {
+    if (!this.isElectron()) {
+      throw new Error('Not running in Electron environment');
+    }
+    return await window.electronAPI.templates.getAllPermissionTemplates();
+  }
+
+  async applyPermissionTemplate(templateId: number, userIds: number[], grantedBy?: number): Promise<void> {
+    if (!this.isElectron()) {
+      throw new Error('Not running in Electron environment');
+    }
+    return await window.electronAPI.templates.applyPermissionTemplate(templateId, userIds, grantedBy);
+  }
+
+  async deletePermissionTemplate(id: number): Promise<void> {
+    if (!this.isElectron()) {
+      throw new Error('Not running in Electron environment');
+    }
+    return await window.electronAPI.templates.deletePermissionTemplate(id);
+  }
 }
 
 // Export singleton instance

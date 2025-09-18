@@ -102,7 +102,35 @@ export const TaskSelector: React.FC<TaskSelectorProps> = ({ onTaskSelect, onCanc
   const loadProjects = async (clientId: number) => {
     try {
       const projectsData = await (window as any).electronAPI?.database.getProjectsByClient(clientId);
-      setProjects(projectsData);
+
+      // Filter projects based on user permissions
+      if (user && user.role !== 'admin' && user.role !== 'director') {
+        // For non-admin users, check permissions for each project
+        const filteredProjects = [];
+
+        for (const project of projectsData) {
+          try {
+            const hasPermission = await (window as any).electronAPI?.permissions.hasUserProjectPermission(
+              user.id,
+              project.id,
+              'track_time'
+            );
+
+            if (hasPermission) {
+              filteredProjects.push(project);
+            }
+          } catch (permError) {
+            console.error('Error checking project permission:', permError);
+            // On error, default to allowing access for backward compatibility
+            filteredProjects.push(project);
+          }
+        }
+
+        setProjects(filteredProjects);
+      } else {
+        // Admins and directors can see all projects
+        setProjects(projectsData);
+      }
     } catch (error) {
       console.error('Error loading projects:', error);
     }
@@ -122,14 +150,14 @@ export const TaskSelector: React.FC<TaskSelectorProps> = ({ onTaskSelect, onCanc
       console.log('TaskSelector: Loading all tasks for search...');
       // Load all hierarchy data for search using electronAPI
       const electronAPI = (window as any).electronAPI;
-      
+
       const [clientsData, projectsData, tasksData] = await Promise.all([
         electronAPI?.database.getAllClients(),
-        electronAPI?.database.getAllClients().then(clients => 
+        electronAPI?.database.getAllClients().then(clients =>
           Promise.all(clients.map(client => electronAPI?.database.getProjectsByClient(client.id)))
         ).then(projectArrays => projectArrays.flat()),
-        electronAPI?.database.getAllClients().then(clients => 
-          Promise.all(clients.map(client => 
+        electronAPI?.database.getAllClients().then(clients =>
+          Promise.all(clients.map(client =>
             electronAPI?.database.getProjectsByClient(client.id).then(projects =>
               Promise.all(projects.map(project => electronAPI?.database.getTasksByProject(project.id)))
             )
@@ -141,24 +169,43 @@ export const TaskSelector: React.FC<TaskSelectorProps> = ({ onTaskSelect, onCanc
 
       // Create flat task list with full hierarchy names for search
       const flatTasks: TaskRef[] = [];
-      
+
       for (const client of clientsData) {
         const clientProjects = projectsData.filter(p => p.client_id === client.id);
-        
+
         for (const project of clientProjects) {
-          const projectTasks = tasksData.filter(t => t.project_id === project.id);
-          
-          for (const task of projectTasks) {
-            flatTasks.push({
-              client: client.name,
-              project: project.name,
-              task: task.name
-            });
+          // Check project permissions for non-admin users
+          let hasProjectAccess = true;
+
+          if (user && user.role !== 'admin' && user.role !== 'director') {
+            try {
+              hasProjectAccess = await electronAPI?.permissions.hasUserProjectPermission(
+                user.id,
+                project.id,
+                'track_time'
+              );
+            } catch (permError) {
+              console.error('Error checking project permission in search:', permError);
+              // On error, default to allowing access for backward compatibility
+              hasProjectAccess = true;
+            }
+          }
+
+          if (hasProjectAccess) {
+            const projectTasks = tasksData.filter(t => t.project_id === project.id);
+
+            for (const task of projectTasks) {
+              flatTasks.push({
+                client: client.name,
+                project: project.name,
+                task: task.name
+              });
+            }
           }
         }
       }
 
-      console.log('TaskSelector: Created flat tasks for search:', flatTasks.length);
+      console.log('TaskSelector: Created flat tasks for search (filtered by permissions):', flatTasks.length);
       setAllTasks(flatTasks);
     } catch (error) {
       console.error('TaskSelector: Error loading all tasks:', error);
