@@ -13,8 +13,17 @@ dist-ssr
 dist-electron
 *.local
 
+# Build output
+build/
+release/
+
 # Database files
 data/
+
+# Temporary files
+.gemini-clipboard/
+GEMINI.md
+src/app-icons-ideas/
 
 # Editor directories and files
 .vscode/*

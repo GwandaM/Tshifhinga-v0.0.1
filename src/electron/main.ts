@@ -3,17 +3,25 @@ const { join: pathJoin } = require('path');
 const { writeFile } = require('fs').promises;
 const { DatabaseService } = require('./database');
 const { AuthService } = require('./auth-service');
-// const { LoggerService } = require('./logger-service');
+const { LoggerService } = require('./logger-service');
 const { ConfigService } = require('./config-service');
-const isDev = require('electron-is-dev');
 
 // Set app name early to ensure proper userData path
 electronApp.setName('tshifhinga-time-tracker');
 
+// Reliable production detection - check if app is packaged
+const isDev = !electronApp.isPackaged;
+console.log('=== ENVIRONMENT DETECTION ===');
+console.log('Running in mode:', isDev ? 'DEVELOPMENT' : 'PRODUCTION');
+console.log('app.isPackaged:', electronApp.isPackaged);
+console.log('__dirname:', __dirname);
+console.log('process.resourcesPath:', process.resourcesPath);
+console.log('============================');
+
 // Keep a global reference of the database service and windows
 let dbService: any;
 let authService: any;
-// let logger: any;
+let logger: any;
 let config: any;
 let mainWindow: any | null = null;
 let miniWindow: any | null = null;
@@ -77,12 +85,21 @@ const createMainWindow = (): void => {
     show: false,
   });
 
-  // Load the app
-  const startUrl = isDev 
-    ? 'http://localhost:8080' 
+  // Load the app with error handling
+  const startUrl = isDev
+    ? 'http://localhost:8080'
     : `file://${pathJoin(__dirname, '../dist/index.html')}`;
-  
-  mainWindow.loadURL(startUrl);
+
+  console.log('Loading main window from:', startUrl);
+  console.log('Expected file path:', pathJoin(__dirname, '../dist/index.html'));
+
+  mainWindow.loadURL(startUrl).catch(err => {
+    console.error('Failed to load main window URL:', err);
+    dialog.showErrorBox(
+      'Failed to Load Application',
+      `Could not load the application interface.\n\nURL: ${startUrl}\nError: ${err.message}\n\nPlease report this issue.`
+    );
+  });
 
   // Show window when ready
   mainWindow.once('ready-to-show', () => {
@@ -142,12 +159,20 @@ const createMiniWindow = (): void => {
     show: false,
   });
 
-  // Load mini view
-  const miniUrl = isDev 
-    ? 'http://localhost:8080?mode=mini' 
+  // Load mini view with error handling
+  const miniUrl = isDev
+    ? 'http://localhost:8080?mode=mini'
     : `file://${pathJoin(__dirname, '../dist/index.html')}?mode=mini`;
-  
-  miniWindow.loadURL(miniUrl);
+
+  console.log('Loading mini window from:', miniUrl);
+
+  miniWindow.loadURL(miniUrl).catch(err => {
+    console.error('Failed to load mini window URL:', err);
+    dialog.showErrorBox(
+      'Failed to Load Mini Window',
+      `Could not load the mini window interface.\n\nURL: ${miniUrl}\nError: ${err.message}`
+    );
+  });
 
   // Show window when ready
   miniWindow.once('ready-to-show', () => {
@@ -205,12 +230,20 @@ const createTaskSelectorWindow = (): void => {
     titleBarStyle: 'default',
   });
 
-  // Load task selector view
-  const taskSelectorUrl = isDev 
-    ? 'http://localhost:8080?mode=taskSelector' 
+  // Load task selector view with error handling
+  const taskSelectorUrl = isDev
+    ? 'http://localhost:8080?mode=taskSelector'
     : `file://${pathJoin(__dirname, '../dist/index.html')}?mode=taskSelector`;
-  
-  taskSelectorWindow.loadURL(taskSelectorUrl);
+
+  console.log('Loading task selector window from:', taskSelectorUrl);
+
+  taskSelectorWindow.loadURL(taskSelectorUrl).catch(err => {
+    console.error('Failed to load task selector window URL:', err);
+    dialog.showErrorBox(
+      'Failed to Load Task Selector',
+      `Could not load the task selector interface.\n\nURL: ${taskSelectorUrl}\nError: ${err.message}`
+    );
+  });
 
   // Show window when ready
   taskSelectorWindow.once('ready-to-show', () => {
@@ -227,39 +260,44 @@ const createTaskSelectorWindow = (): void => {
 const createTray = (): void => {
   let icon;
   try {
-    // Try to load the tray icon from multiple possible locations
+    // Try multiple possible icon locations for both dev and production
     const iconPaths = [
-      pathJoin(__dirname, '../assets/tray-icon.png'),
+      // Production paths (in asar)
+      pathJoin(process.resourcesPath || __dirname, 'app.asar.unpacked/dist/assets/icon.png'),
+      pathJoin(process.resourcesPath || __dirname, 'app.asar/dist/assets/icon.png'),
+      pathJoin(process.resourcesPath || __dirname, 'app.asar/dist/favicon.ico'),
+      pathJoin(__dirname, '../dist/assets/icon.png'),
+      pathJoin(__dirname, '../dist/favicon.ico'),
+      // Development paths
+      pathJoin(__dirname, '../public/icon.png'),
       pathJoin(__dirname, '../public/favicon.ico'),
-      pathJoin((process as any).resourcesPath || __dirname, '../assets/tray-icon.png')
+      pathJoin(__dirname, '../assets/tray-icon.png'),
     ];
-    
+
+    console.log('Trying tray icon paths:', iconPaths);
+
     let iconLoaded = false;
     for (const iconPath of iconPaths) {
       try {
-        icon = nativeImage.createFromPath(iconPath);
-        if (!icon.isEmpty()) {
-          iconLoaded = true;
-          console.log('Tray icon loaded from:', iconPath);
-          break;
+        // Check if file exists first
+        if (require('fs').existsSync(iconPath)) {
+          icon = nativeImage.createFromPath(iconPath);
+          if (!icon.isEmpty()) {
+            iconLoaded = true;
+            console.log('Tray icon loaded from:', iconPath);
+            icon = icon.resize({ width: 16, height: 16 });
+            break;
+          }
         }
       } catch (e) {
         // Continue to next path
       }
     }
-    
+
     if (!iconLoaded) {
       console.warn('No tray icon found, using system default');
-    }
-    
-    // Check if icon was loaded successfully
-    if (!iconLoaded || icon.isEmpty()) {
-      // Create a simple fallback icon
+      // Create an empty icon which will show a default system icon
       icon = nativeImage.createEmpty();
-      // You could also use a system icon or create a simple programmatic icon
-      // For now, we'll use an empty icon which will show a default system icon
-    } else {
-      icon = icon.resize({ width: 16, height: 16 });
     }
   } catch (error) {
     console.error('Error loading tray icon:', error);
@@ -382,17 +420,34 @@ const switchToTray = (): void => {
 electronApp.whenReady().then(async () => {
   try {
     // Initialize services with proper error handling
-    // logger = LoggerService.getInstance();
+    logger = LoggerService.getInstance();
+    logger.info('=== Application Starting ===', 'MAIN');
+    logger.info(`Environment: ${isDev ? 'DEVELOPMENT' : 'PRODUCTION'}`, 'MAIN');
+    logger.info(`Platform: ${process.platform} ${process.arch}`, 'MAIN');
+    logger.info(`Electron: ${process.versions.electron}`, 'MAIN');
+    logger.info(`Node: ${process.versions.node}`, 'MAIN');
+    logger.info(`__dirname: ${__dirname}`, 'MAIN');
+    logger.info(`resourcesPath: ${process.resourcesPath}`, 'MAIN');
+    logger.info(`userData: ${electronApp.getPath('userData')}`, 'MAIN');
+
     config = ConfigService.getInstance();
-    
+
     console.log('Application starting');
     
     // Validate configuration
     const configValidation = config.validateConfig();
     if (!configValidation.isValid) {
-      console.error('Configuration validation failed:', {
-        errors: configValidation.errors
-      });
+      const errorMsg = `Configuration validation failed:\n${configValidation.errors.join('\n')}`;
+      console.error(errorMsg);
+
+      dialog.showErrorBox(
+        'Configuration Error',
+        `The application configuration is invalid:\n\n` +
+        configValidation.errors.join('\n') + '\n\n' +
+        `Config file location:\n` +
+        `~/Library/Application Support/tshifhinga-time-tracker/config/app-config.json`
+      );
+
       throw new Error(`Configuration invalid: ${configValidation.errors.join(', ')}`);
     }
     
@@ -440,6 +495,30 @@ electronApp.whenReady().then(async () => {
   } catch (error) {
     console.error('Application initialization failed:', error);
     console.error('Critical error during app initialization:', error);
+
+    // Show error to user before quitting
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : '';
+
+    dialog.showErrorBox(
+      'Application Startup Failed',
+      `The application failed to initialize and will now close.\n\n` +
+      `Error: ${errorMessage}\n\n` +
+      `Log file location:\n` +
+      `~/Library/Application Support/tshifhinga-time-tracker/crash.log\n\n` +
+      `To see detailed logs, run from terminal:\n` +
+      `/Applications/Tshifhinga\\ Time\\ Tracker.app/Contents/MacOS/Tshifhinga\\ Time\\ Tracker`
+    );
+
+    // Write error to crash log
+    try {
+      const logPath = pathJoin(electronApp.getPath('userData'), 'crash.log');
+      const logMessage = `\n=== CRASH at ${new Date().toISOString()} ===\n${errorMessage}\n${errorStack}\n`;
+      require('fs').appendFileSync(logPath, logMessage, 'utf8');
+    } catch (logError) {
+      console.error('Failed to write crash log:', logError);
+    }
+
     electronApp.quit();
   }
 

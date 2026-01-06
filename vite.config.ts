@@ -43,6 +43,46 @@ export default defineConfig(({ mode }) => ({
           }
         }
       },
+      {
+        entry: "src/electron/config-service.ts",
+        vite: {
+          build: {
+            outDir: "dist-electron"
+          }
+        }
+      },
+      {
+        entry: "src/electron/logger-service.ts",
+        vite: {
+          build: {
+            outDir: "dist-electron"
+          }
+        }
+      },
+      {
+        entry: "src/electron/migration-service.ts",
+        vite: {
+          build: {
+            outDir: "dist-electron"
+          }
+        }
+      },
+      {
+        entry: "src/electron/database-connection-pool.ts",
+        vite: {
+          build: {
+            outDir: "dist-electron"
+          }
+        }
+      },
+      {
+        entry: "src/electron/validation-service.ts",
+        vite: {
+          build: {
+            outDir: "dist-electron"
+          }
+        }
+      },
     ]),
     renderer(),
   ],
