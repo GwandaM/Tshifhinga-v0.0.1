@@ -1,0 +1,196 @@
+# Distributed Sync Implementation Plan
+
+## Overview
+Implementation plan for evolving Tshifhinga Time Tracker from single-user to distributed team sync with local-first architecture.
+
+---
+
+## Phase 1: Foundation
+**Status: COMPLETED**
+
+### Tasks
+- [x] Set up PostgreSQL schema with proper indexing
+- [x] Implement authentication middleware for sync (types defined)
+- [x] Add schema version tracking
+- [x] Create soft-delete mechanism
+- [x] Add sync metadata columns to local SQLite
+- [x] Create SyncService foundation class
+
+### Files Created
+- `src/electron/sync/postgres-schema.sql` - Central PostgreSQL schema
+- `src/electron/sync/sync-types.ts` - TypeScript types and interfaces
+- `src/electron/sync/sync-migrations.ts` - SQLite migration runner
+- `src/electron/sync/sync-service.ts` - Core sync service
+- `src/electron/sync/index.ts` - Module exports
+
+### Technical Details
+
+#### 1.1 PostgreSQL Schema
+Central database schema mirroring local SQLite with additional sync fields:
+- `synced_at` - when record arrived at server
+- `origin_client_id` - which client created the record
+- `version` - for conflict detection
+
+#### 1.2 Authentication Middleware
+- JWT-based authentication for all sync endpoints
+- Token validation before accepting data
+- User can only push sessions with their own user_id
+
+#### 1.3 Schema Versioning
+- Server exposes min/current schema version
+- Client checks compatibility before sync
+- Graceful degradation for version mismatches
+
+#### 1.4 Soft Deletes
+- `deleted_at` timestamp column on all syncable tables
+- Never hard-delete from central DB
+- Sync includes deleted records as tombstones
+
+---
+
+## Phase 2: Basic Sync
+**Status: PARTIALLY STARTED**
+
+### Tasks
+- [x] Build SyncService class in Electron main process (foundation done)
+- [ ] Implement HTTP client for server communication
+- [ ] Implement push logic (sessions → PostgreSQL)
+- [ ] Implement delta pull (projects/clients from server)
+- [ ] Add conflict detection (log only initially)
+- [ ] Service discovery (mDNS or DNS-based)
+- [ ] Add "Sync Now" button to UI header
+
+### Technical Details
+
+#### 2.1 SyncService Architecture
+```typescript
+class SyncService {
+  async runSync(): Promise<SyncResult>
+  async pushPendingSessions(): Promise<PushResult>
+  async pullUpdates(lastSyncTimestamp: string): Promise<PullResult>
+  async discoverServer(): Promise<ServerConfig>
+}
+```
+
+#### 2.2 Delta Sync
+- Track `last_pull_timestamp` locally
+- Server only sends records modified since last sync
+- Dramatically reduces bandwidth after initial sync
+
+#### 2.3 Service Discovery Priority
+1. DNS lookup (timetracker.company.local)
+2. mDNS/Bonjour broadcast
+3. Static config file fallback
+
+---
+
+## Phase 3: Resilience
+**Status: NOT STARTED**
+
+### Tasks
+- [ ] Retry logic with exponential backoff
+- [ ] Sync health monitoring
+- [ ] Manual sync button with status indicator
+- [ ] Admin conflict resolution UI
+- [ ] Offline queue management
+
+### Technical Details
+
+#### 3.1 Retry Strategy
+- Initial retry: 30 seconds
+- Exponential backoff: 30s → 1m → 2m → 5m → 15m (max)
+- Reset on successful sync
+
+#### 3.2 Health Indicators
+- Green: Last sync < 30 min
+- Yellow: Last sync 30-120 min
+- Red: Last sync > 2 hours
+
+---
+
+## Phase 4: Advanced Features
+**Status: NOT STARTED**
+
+### Tasks
+- [ ] Real-time notifications via WebSocket
+- [ ] Bulk operations optimization
+- [ ] Data export from central DB
+- [ ] Audit trail viewer
+- [ ] Admin dashboard for team stats
+
+---
+
+## API Specification
+
+### Sync Endpoint
+```
+POST /api/sync
+Authorization: Bearer <jwt_token>
+```
+
+**Request:**
+```json
+{
+  "client_version": "1.2.0",
+  "schema_version": 5,
+  "last_pull_timestamp": "2025-01-05T14:30:00Z",
+  "push_data": {
+    "sessions": [...]
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "server_timestamp": "2025-01-06T10:15:00Z",
+  "push_results": {
+    "accepted": ["uuid-1", "uuid-2"],
+    "conflicts": [],
+    "rejected": []
+  },
+  "pull_data": {
+    "projects": [...],
+    "clients": [...],
+    "notifications": [...]
+  }
+}
+```
+
+---
+
+## Security Considerations
+
+1. **Transport**: HTTPS/TLS for all sync traffic
+2. **Authentication**: JWT tokens with expiration
+3. **Authorization**: Users can only push their own data
+4. **Validation**: Server validates all incoming data
+5. **Rate Limiting**: Max 1000 records per sync, 10 requests/min
+
+---
+
+## Conflict Resolution Strategy
+
+### For Sessions (Last-Write-Wins with Versioning)
+- Each record has `version` field
+- Server checks version match before update
+- Conflicts logged for manual review
+
+### For Projects/Clients (Server-Authoritative)
+- Only admins can modify
+- Client pulls latest from server
+
+---
+
+## Progress Log
+
+| Date | Phase | Task | Status |
+|------|-------|------|--------|
+| 2026-01-06 | 1 | Started Phase 1 implementation | In Progress |
+| 2026-01-06 | 1 | Created PostgreSQL schema (postgres-schema.sql) | Completed |
+| 2026-01-06 | 1 | Created sync types and interfaces (sync-types.ts) | Completed |
+| 2026-01-06 | 1 | Created SQLite migrations (sync-migrations.ts) | Completed |
+| 2026-01-06 | 1 | Created SyncService foundation (sync-service.ts) | Completed |
+| 2026-01-06 | 1 | **Phase 1 Complete** | Completed |
+
