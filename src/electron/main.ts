@@ -1,4 +1,4 @@
-const { app: electronApp, BrowserWindow, ipcMain, dialog, powerMonitor, Tray, Menu, nativeImage } = require('electron');
+const { app: electronApp, BrowserWindow, ipcMain, dialog, powerMonitor, Tray, Menu, nativeImage, screen } = require('electron');
 const { join: pathJoin } = require('path');
 const { writeFile } = require('fs').promises;
 const { DatabaseService } = require('./database');
@@ -135,12 +135,31 @@ const createMainWindow = (): void => {
 };
 
 const createMiniWindow = (): void => {
+  // Calculate center position if coordinates are not set
+  let x = windowState.miniWindowBounds.x;
+  let y = windowState.miniWindowBounds.y;
+
+  if (x === undefined || y === undefined) {
+    const primaryDisplay = screen.getPrimaryDisplay();
+    const { width, height } = primaryDisplay.workAreaSize;
+    const winWidth = windowState.miniWindowBounds.width || 420;
+    const winHeight = windowState.miniWindowBounds.height || 50;
+
+    x = Math.floor((width - winWidth) / 2);
+    y = Math.floor((height - winHeight) / 2); // Center vertically
+
+    // Update state to remember this calculated position
+    windowState.miniWindowBounds.x = x;
+    windowState.miniWindowBounds.y = y;
+  }
+
   // Create mini window
   miniWindow = new BrowserWindow({
-    width: windowState.miniWindowBounds.width,
-    height: windowState.miniWindowBounds.height,
-    x: windowState.miniWindowBounds.x,
-    y: windowState.miniWindowBounds.y,
+    width: 420, // Force fixed width
+    height: 50, // Force fixed height
+    x: x,
+    y: y,
+    useContentSize: true,
     minWidth: 380,
     minHeight: 50,
     maxWidth: 500,
@@ -152,6 +171,9 @@ const createMiniWindow = (): void => {
       preload: pathJoin(__dirname, 'preload.js'),
     },
     frame: false,
+    transparent: true, // Enable transparency
+    hasShadow: false, // Disable shadow to prevent large box
+    backgroundColor: '#00000000', // Fully transparent background
     alwaysOnTop: windowState.miniAlwaysOnTop,
     skipTaskbar: false,
     resizable: true,
@@ -318,7 +340,7 @@ const createTray = (): void => {
       click: () => switchToMini()
     },
     {
-      label: 'Show Full View', 
+      label: 'Show Full View',
       click: () => switchToFull()
     },
     { type: 'separator' },
@@ -369,14 +391,14 @@ const switchToFull = (): void => {
     miniWindow.close();
     miniWindow = null;
   }
-  
+
   if (!mainWindow) {
     createMainWindow();
   } else {
     mainWindow.show();
     mainWindow.focus();
   }
-  
+
   windowState.mode = 'full';
 };
 
@@ -384,14 +406,14 @@ const switchToMini = (): void => {
   if (mainWindow) {
     mainWindow.hide();
   }
-  
+
   if (!miniWindow) {
     createMiniWindow();
   } else {
     miniWindow.show();
     miniWindow.focus();
   }
-  
+
   windowState.mode = 'mini';
 };
 
@@ -402,11 +424,11 @@ const switchToTray = (): void => {
   if (miniWindow) {
     miniWindow.hide();
   }
-  
+
   if (!tray || tray.isDestroyed()) {
     createTray();
   }
-  
+
   if (tray && !tray.isDestroyed()) {
     windowState.mode = 'tray';
   } else {
@@ -433,7 +455,7 @@ electronApp.whenReady().then(async () => {
     config = ConfigService.getInstance();
 
     console.log('Application starting');
-    
+
     // Validate configuration
     const configValidation = config.validateConfig();
     if (!configValidation.isValid) {
@@ -450,17 +472,17 @@ electronApp.whenReady().then(async () => {
 
       throw new Error(`Configuration invalid: ${configValidation.errors.join(', ')}`);
     }
-    
+
     // Initialize database
     dbService = new DatabaseService();
     await dbService.init();
     console.log('Database service initialized');
-    
+
     // Create analytics tables and views for performance optimization
     try {
       await dbService.createAnalyticsTables();
       console.log('Analytics tables created successfully');
-      
+
       // Populate analytics summary tables if they're empty
       await dbService.populateAnalyticsSummaries();
       console.log('Analytics summary tables populated');
@@ -468,12 +490,12 @@ electronApp.whenReady().then(async () => {
       console.error('Analytics setup failed:', analyticsError);
       // Don't fail the app startup, but log the error
     }
-    
+
     // Initialize auth service
     authService = new AuthService();
     await authService.init();
     console.log('Auth service initialized');
-    
+
     // Check if we need to promote the first user to admin
     const allUsers = await authService.getAllUsers();
     const adminUsers = allUsers.filter(user => user.role === 'admin');
@@ -489,9 +511,9 @@ electronApp.whenReady().then(async () => {
 
     // Create tray immediately
     createTray();
-    
+
     console.log('Application initialized successfully');
-    
+
   } catch (error) {
     console.error('Application initialization failed:', error);
     console.error('Critical error during app initialization:', error);
@@ -536,11 +558,11 @@ electronApp.whenReady().then(async () => {
     const wakeTime = Date.now();
     const sleepDuration = systemSleepTime ? wakeTime - systemSleepTime : 0;
     console.log(`[PowerMonitor] System was asleep for ${Math.round(sleepDuration / 1000)}s`);
-    
+
     // Notify all renderer processes about system wake
     const windows = [mainWindow, miniWindow].filter(w => w && !w.isDestroyed());
     windows.forEach(win => win.webContents.send('system-resume', { wakeTime, sleepDuration }));
-    
+
     systemSleepTime = null;
   });
 
@@ -580,30 +602,30 @@ electronApp.on('window-all-closed', () => {
 
 electronApp.on('before-quit', async () => {
   console.log('Application shutting down', 'MAIN');
-  
+
   try {
     // Clean up timer intervals
     stopTimerInterval();
     stopTimerStateValidation();
-    
+
     // Clean up database and auth service connections
     if (authService) {
       await authService.close();
       console.log('Auth service closed', 'MAIN');
     }
-    
+
     if (dbService) {
       await dbService.close();
       console.log('Database service closed', 'MAIN');
     }
-    
+
     // Clean up logs if needed
     // if (logger) {
     //   await logger.cleanupOldLogs();
     //   logger.info('Application shutdown complete', 'MAIN');
     // }
     console.log('Application shutdown complete');
-    
+
   } catch (error) {
     console.error('Error during application shutdown:', error);
   }
@@ -660,20 +682,20 @@ ipcMain.handle('window:set-auto-switch-condition', (_, onlyWhenRunning) => {
 // Mini window always on top handlers
 ipcMain.handle('window:toggle-mini-always-on-top', () => {
   // Get current state and toggle it
-  const currentState = miniWindow && !miniWindow.isDestroyed() 
-    ? miniWindow.isAlwaysOnTop() 
+  const currentState = miniWindow && !miniWindow.isDestroyed()
+    ? miniWindow.isAlwaysOnTop()
     : windowState.miniAlwaysOnTop;
-  
+
   const newState = !currentState;
   windowState.miniAlwaysOnTop = newState;
-  
+
   if (miniWindow && !miniWindow.isDestroyed()) {
     miniWindow.setAlwaysOnTop(newState);
     console.log('Mini window always on top toggled to:', newState);
   } else {
     console.log('Mini window always on top state stored for future use:', newState);
   }
-  
+
   return newState;
 });
 
@@ -701,10 +723,10 @@ ipcMain.handle('window:expand-mini-for-dropdown', () => {
       clearTimeout(expandTimeout);
       expandTimeout = null;
     }
-    
+
     const currentBounds = miniWindow.getBounds();
     const expandedHeight = 200; // Fixed expanded height for dropdown
-    
+
     miniWindow.setSize(currentBounds.width, expandedHeight);
     isExpanded = true;
     console.log('Mini window expanded for dropdown');
@@ -720,10 +742,10 @@ ipcMain.handle('window:collapse-mini-from-dropdown', () => {
       clearTimeout(expandTimeout);
       expandTimeout = null;
     }
-    
+
     const originalHeight = 50; // Original mini window height
     const currentBounds = miniWindow.getBounds();
-    
+
     miniWindow.setSize(currentBounds.width, originalHeight);
     isExpanded = false;
     console.log('Mini window collapsed from dropdown');
@@ -739,10 +761,10 @@ ipcMain.handle('window:force-collapse-mini', () => {
       clearTimeout(expandTimeout);
       expandTimeout = null;
     }
-    
+
     const originalHeight = 50;
     const currentBounds = miniWindow.getBounds();
-    
+
     miniWindow.setSize(currentBounds.width, originalHeight);
     isExpanded = false;
     console.log('Mini window force collapsed');
@@ -773,7 +795,7 @@ ipcMain.handle('window:close-task-selector', () => {
 // Handler for task selection from the selector window
 ipcMain.on('task:selected', (_, task) => {
   console.log('Task selected:', task);
-  
+
   // Send the selected task to mini window and main window
   if (miniWindow && !miniWindow.isDestroyed()) {
     miniWindow.webContents.send('task:selected', task);
@@ -781,7 +803,7 @@ ipcMain.on('task:selected', (_, task) => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('task:selected', task);
   }
-  
+
   // Close the task selector window
   if (taskSelectorWindow) {
     taskSelectorWindow.close();
@@ -801,7 +823,7 @@ const startTimerStateValidation = () => {
         console.warn('Timer interval active but state not running - fixing', 'TIMER');
         stopTimerInterval();
       }
-      
+
       // Check for runaway timers (more than 24 hours)
       if (currentTimerState.activeMs > 24 * 60 * 60 * 1000) {
         console.warn('Timer has been running for more than 24 hours - auto-stopping', 'TIMER', {
@@ -838,14 +860,14 @@ const broadcastTimerState = () => {
       startTs: currentTimerState.startTs,
       task: currentTimerState.task
     };
-    
+
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('timer:state-sync', safeState);
     }
     if (miniWindow && !miniWindow.isDestroyed()) {
       miniWindow.webContents.send('timer:state-sync', safeState);
     }
-    
+
     // Update tray tooltip with timer info
     updateTrayTooltip(safeState);
   } catch (error) {
@@ -855,7 +877,7 @@ const broadcastTimerState = () => {
 
 const updateTrayTooltip = (state: any) => {
   if (!tray || tray.isDestroyed()) return;
-  
+
   try {
     if (state.status === 'running' && state.activeMs > 0) {
       const minutes = Math.floor(state.activeMs / 60000);
@@ -874,35 +896,35 @@ const updateTrayTooltip = (state: any) => {
 const startTimerInterval = () => {
   // Clean up any existing intervals
   stopTimerInterval();
-  
+
   // Clear any pending cleanup
   if (timerCleanupTimeout) {
     clearTimeout(timerCleanupTimeout);
     timerCleanupTimeout = null;
   }
-  
+
   currentTimerState.lastUpdateTs = Date.now();
-  
+
   timerInterval = setInterval(() => {
     try {
       if (currentTimerState.status === 'running' && currentTimerState.startTs) {
         const now = Date.now();
         const timeSinceLastUpdate = currentTimerState.lastUpdateTs ? now - currentTimerState.lastUpdateTs : 1000;
-        
+
         // Prevent time drift by using actual elapsed time
         const maxUpdateTime = 2000; // Max 2 seconds to prevent large jumps
         const updateTime = Math.min(timeSinceLastUpdate, maxUpdateTime);
-        
+
         currentTimerState.activeMs += updateTime;
         currentTimerState.lastUpdateTs = now;
-        
+
         broadcastTimerState();
-        
+
         // Log performance warning for slow updates
         if (timeSinceLastUpdate > 1500) {
-          console.warn('Timer update was slow', 'TIMER', { 
+          console.warn('Timer update was slow', 'TIMER', {
             timeSinceLastUpdate,
-            activeMs: currentTimerState.activeMs 
+            activeMs: currentTimerState.activeMs
           });
         }
       } else {
@@ -918,7 +940,7 @@ const startTimerInterval = () => {
       stopTimerInterval();
     }
   }, 1000);
-  
+
   // Set up automatic cleanup after 24 hours (safety mechanism)
   timerCleanupTimeout = setTimeout(() => {
     console.warn('Timer auto-cleanup after 24 hours', 'TIMER');
@@ -933,12 +955,12 @@ const stopTimerInterval = () => {
     clearInterval(timerInterval);
     timerInterval = null;
   }
-  
+
   if (timerCleanupTimeout) {
     clearTimeout(timerCleanupTimeout);
     timerCleanupTimeout = null;
   }
-  
+
   currentTimerState.lastUpdateTs = null;
 };
 
@@ -946,16 +968,16 @@ const stopTimerInterval = () => {
 ipcMain.on('timer:start', (_, task) => {
   try {
     console.log('Timer start requested', 'TIMER', { task: task?.client });
-    
+
     // Validate task data
     if (!task || !task.client || !task.project || !task.task) {
       console.error('Invalid task data for timer start', 'TIMER', undefined, { task });
       return;
     }
-    
+
     // Stop any existing timer
     stopTimerInterval();
-    
+
     currentTimerState = {
       status: 'running',
       activeMs: 0,
@@ -968,10 +990,10 @@ ipcMain.on('timer:start', (_, task) => {
         task: String(task.task || '').trim()
       }
     };
-    
+
     startTimerInterval();
     broadcastTimerState();
-    
+
     console.log('Timer started successfully', 'TIMER', {
       client: currentTimerState.task.client,
       project: currentTimerState.task.project,
@@ -1023,13 +1045,13 @@ ipcMain.on('timer:resume', () => {
 
 ipcMain.handle('timer:stop', async (_, data) => {
   const stopTime = Date.now();
-  
+
   try {
     if (currentTimerState.status === 'stopped') {
       console.warn('Timer stop requested but timer already stopped', 'TIMER');
       return;
     }
-    
+
     if (!currentTimerState.task) {
       console.error('Timer stop requested but no task set', 'TIMER');
       stopTimerInterval();
@@ -1037,18 +1059,18 @@ ipcMain.handle('timer:stop', async (_, data) => {
       broadcastTimerState();
       return;
     }
-    
+
     const { notes, token } = data || {};
-    
+
     console.log('Timer stop requested', 'TIMER', {
       activeMs: currentTimerState.activeMs,
       pausedMs: currentTimerState.pausedMs,
       hasNotes: !!notes
     });
-    
+
     // Stop the timer interval first
     stopTimerInterval();
-    
+
     // Get user ID from token
     let userId = null;
     if (token) {
@@ -1064,7 +1086,7 @@ ipcMain.handle('timer:stop', async (_, data) => {
 
     // Ensure minimum session duration (at least 1 second)
     const finalActiveMs = Math.max(currentTimerState.activeMs, 1000);
-    
+
     // Save session to database
     const sessionId = `session-${stopTime}-${Math.random().toString(36).substring(2, 15)}`;
     const session = {
@@ -1089,7 +1111,7 @@ ipcMain.handle('timer:stop', async (_, data) => {
         activeMs: finalActiveMs,
         userId
       });
-      
+
       // Notify renderer to refresh sessions
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('timer-action-refresh-sessions');
@@ -1103,7 +1125,7 @@ ipcMain.handle('timer:stop', async (_, data) => {
         activeMs: finalActiveMs
       });
     }
-    
+
     // Reset timer state (preserve task selection for UI)
     currentTimerState = {
       status: 'stopped',
@@ -1113,12 +1135,12 @@ ipcMain.handle('timer:stop', async (_, data) => {
       lastUpdateTs: null,
       task: currentTimerState.task // Keep the task selected in UI
     };
-    
+
     broadcastTimerState();
-    
+
   } catch (error) {
     console.error('Error stopping timer', 'TIMER', error as Error);
-    
+
     // Ensure timer is stopped even if there's an error
     stopTimerInterval();
     currentTimerState.status = 'stopped';

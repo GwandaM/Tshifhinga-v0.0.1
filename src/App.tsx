@@ -52,6 +52,14 @@ const App = () => {
     }
   }, []);
 
+  useEffect(() => {
+    if (windowMode === 'mini') {
+      document.body.classList.add('mini-mode');
+    } else {
+      document.body.classList.remove('mini-mode');
+    }
+  }, [windowMode]);
+
 
 
 
