@@ -426,10 +426,12 @@ electronApp.whenReady().then(async () => {
       console.log('No admin users found, promoting first user to admin...');
       await authService.promoteFirstUserToAdmin();
     }
-    
+
     // Create main window initially
-    createMainWindow();
-    
+    if (!mainWindow) {
+      createMainWindow();
+    }
+
     // Create tray immediately
     createTray();
     
@@ -475,17 +477,21 @@ electronApp.whenReady().then(async () => {
     // Notify all renderer processes about screen unlock
     const windows = [mainWindow, miniWindow].filter(w => w && !w.isDestroyed());
     windows.forEach(win => win.webContents.send('screen-unlock', Date.now()));
-
-  electronApp.on('activate', () => {
-    // On macOS, re-create a window when dock icon is clicked
-    if (BrowserWindow.getAllWindows().length === 0) {
-      if (windowState.mode === 'full') {
-        createMainWindow();
-      } else {
-        switchToFull();
-      }
-    }
   });
+}).catch((error) => {
+  console.error('Failed to initialize application:', error);
+  electronApp.quit();
+});
+
+electronApp.on('activate', () => {
+  // On macOS, re-create a window when dock icon is clicked
+  if (BrowserWindow.getAllWindows().length === 0) {
+    if (windowState.mode === 'full') {
+      createMainWindow();
+    } else {
+      switchToFull();
+    }
+  }
 });
 
 electronApp.on('window-all-closed', () => {
@@ -1337,9 +1343,4 @@ ipcMain.handle('templates:apply-permission-template', async (_, templateId, user
 
 ipcMain.handle('templates:delete-permission-template', async (_, id) => {
   return await dbService.deletePermissionTemplate(id);
-});
-
-}).catch((error) => {
-  console.error('Failed to initialize application:', error);
-  electronApp.quit();
 });

@@ -52,15 +52,18 @@ class AuthService {
 
   private async createDefaultAdmin(): Promise<void> {
     try {
-      // Check if any admin exists
-      const allUsers = await this.db.getAllUsers();
-      const adminExists = allUsers.some(user => user.role === 'admin');
-      
-      if (!adminExists) {
-        console.log('No admin users found. Please register the first admin user through the UI.');
+      // Check if admin already exists
+      const existingAdmin = await this.db.getUserByUsername('admin');
+      if (existingAdmin) {
+        return;
       }
+
+      // Create default admin user
+      const hashedPassword = await bcrypt.hash('admin123', 10);
+      await this.db.createUser('admin', 'admin@example.com', hashedPassword, 'admin');
+      console.log('Default admin user created: username=admin, password=admin123');
     } catch (error) {
-      console.error('Error checking for admin users:', error);
+      console.error('Error creating default admin:', error);
     }
   }
 
