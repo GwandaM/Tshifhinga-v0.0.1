@@ -22,6 +22,7 @@ import CalendarPage from "./pages/Calendar";
 import UserManagement from "./pages/admin/UserManagement";
 import ActivityMonitoring from "./pages/admin/ActivityMonitoring";
 import ProjectManagement from "./pages/admin/ProjectManagement";
+import SyncManagement from "./pages/admin/SyncManagement";
 
 const queryClient = new QueryClient();
 
@@ -183,13 +184,21 @@ const App = () => {
                               </ProtectedRoute>
                             } 
                           />
-                          <Route 
-                            path="/admin/projects" 
+                          <Route
+                            path="/admin/projects"
                             element={
                               <ProtectedRoute requiredPermission="manage_projects">
                                 <ProjectManagement />
                               </ProtectedRoute>
-                            } 
+                            }
+                          />
+                          <Route
+                            path="/admin/sync"
+                            element={
+                              <ProtectedRoute requiredPermission="manage_users">
+                                <SyncManagement />
+                              </ProtectedRoute>
+                            }
                           />
                           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                           <Route path="*" element={<Index />} />

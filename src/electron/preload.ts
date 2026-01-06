@@ -163,6 +163,55 @@ const electronAPI = {
       ipcRenderer.invoke('templates:apply-permission-template', templateId, userIds, grantedBy),
     deletePermissionTemplate: (id) => ipcRenderer.invoke('templates:delete-permission-template', id),
   },
+  // Sync operations for distributed team sync
+  sync: {
+    // Trigger immediate sync
+    syncNow: () => ipcRenderer.invoke('sync:now'),
+    // Get current sync state
+    getState: () => ipcRenderer.invoke('sync:get-state'),
+    // Get sync health status
+    getHealth: () => ipcRenderer.invoke('sync:get-health'),
+    // Get unresolved conflicts
+    getConflicts: () => ipcRenderer.invoke('sync:get-conflicts'),
+    // Resolve a conflict
+    resolveConflict: (conflictId, resolution, notes) =>
+      ipcRenderer.invoke('sync:resolve-conflict', conflictId, resolution, notes),
+    // Update sync configuration
+    updateConfig: (config) => ipcRenderer.invoke('sync:update-config', config),
+    // Configure server connection
+    configureServer: (config) => ipcRenderer.invoke('sync:configure-server', config),
+    // Check server connectivity
+    checkConnectivity: () => ipcRenderer.invoke('sync:check-connectivity'),
+    // Discover server automatically
+    discoverServer: (forceRefresh) => ipcRenderer.invoke('sync:discover-server', forceRefresh),
+    // Set auth token for sync
+    setAuthToken: (token) => ipcRenderer.invoke('sync:set-auth-token', token),
+    // Event listeners
+    onSyncStarted: (callback) => {
+      ipcRenderer.on('sync:started', callback);
+      return () => ipcRenderer.removeListener('sync:started', callback);
+    },
+    onSyncProgress: (callback) => {
+      ipcRenderer.on('sync:progress', callback);
+      return () => ipcRenderer.removeListener('sync:progress', callback);
+    },
+    onSyncCompleted: (callback) => {
+      ipcRenderer.on('sync:completed', callback);
+      return () => ipcRenderer.removeListener('sync:completed', callback);
+    },
+    onSyncError: (callback) => {
+      ipcRenderer.on('sync:error', callback);
+      return () => ipcRenderer.removeListener('sync:error', callback);
+    },
+    onSyncStateChanged: (callback) => {
+      ipcRenderer.on('sync:state-changed', callback);
+      return () => ipcRenderer.removeListener('sync:state-changed', callback);
+    },
+    onNewNotification: (callback) => {
+      ipcRenderer.on('sync:new-notification', callback);
+      return () => ipcRenderer.removeListener('sync:new-notification', callback);
+    },
+  },
 };
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);

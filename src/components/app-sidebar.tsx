@@ -1,5 +1,5 @@
 import { NavLink, useLocation } from "react-router-dom";
-import { Clock, CalendarDays, Menu, Users, Shield, Activity, LayoutDashboard } from "lucide-react";
+import { Clock, CalendarDays, Menu, Users, Shield, Activity, LayoutDashboard, Cloud } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -27,6 +27,7 @@ const adminItems = [
   { title: "User Management", url: "/admin/users", icon: Users, permission: "manage_users" },
   { title: "Activity Monitor", url: "/admin/activity", icon: Activity, permission: "view_all_sessions" },
   { title: "Project Access", url: "/admin/projects", icon: Shield, permission: "manage_projects" },
+  { title: "Sync Management", url: "/admin/sync", icon: Cloud, permission: "manage_users" },
 ];
 
 export function AppSidebar() {
