@@ -15,7 +15,7 @@
     "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:8080 && npx electron dist-electron/main.js\" --kill-others-on-fail",
     "electron:pack": "electron-builder",
     "electron:build": "npm run build && npm run build:electron && npm run electron:pack",
-    "electron:build:clean": "npm run build && npm run build:electron && npm prune --production && npm run electron:pack && npm install",
+    "electron:build:clean": "npm run build && npm run build:electron && node scripts/prune-and-build.js",
     "build:electron": "echo 'Electron files compiled by Vite plugin'"
   },
   "dependencies": {
