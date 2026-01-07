@@ -15,6 +15,7 @@
     "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:8080 && npx electron dist-electron/main.js\" --kill-others-on-fail",
     "electron:pack": "electron-builder",
     "electron:build": "npm run build && npm run build:electron && npm run electron:pack",
+    "electron:build:clean": "npm run build && npm run build:electron && npm prune --production && npm run electron:pack && npm install",
     "build:electron": "echo 'Electron files compiled by Vite plugin'"
   },
   "dependencies": {
@@ -47,12 +48,7 @@
     "@radix-ui/react-toggle-group": "^1.1.10",
     "@radix-ui/react-tooltip": "^1.2.7",
     "@tanstack/react-query": "^5.83.0",
-    "@types/bcryptjs": "^3.0.0",
-    "@types/jsonwebtoken": "^9.0.10",
-    "@types/uuid": "^11.0.0",
-    "baseline-browser-mapping": "^2.9.11",
     "bcryptjs": "^3.0.2",
-    "caniuse-lite": "^1.0.30001762",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
@@ -83,10 +79,13 @@
     "@tailwindcss/typography": "^0.5.16",
     "@testing-library/jest-dom": "^6.7.0",
     "@testing-library/react": "^16.3.0",
+    "@types/bcryptjs": "^3.0.0",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.16.5",
     "@types/react": "^18.3.23",
     "@types/react-dom": "^18.3.7",
     "@types/sqlite3": "^5.1.0",
+    "@types/uuid": "^11.0.0",
     "@vitejs/plugin-react-swc": "^3.11.0",
     "@vitest/ui": "^3.2.4",
     "autoprefixer": "^10.4.21",
@@ -111,30 +110,38 @@
   "build": {
     "appId": "com.tshifhinga.timetracker",
     "productName": "Tshifhinga Time Tracker",
+    "afterPack": "./scripts/afterPack.js",
     "directories": {
       "output": "release"
     },
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
-      "!node_modules/**/{CHANGELOG.md,README.md,README,readme.md,readme}",
-      "!node_modules/**/{test,__tests__,tests,powered-test,example,examples}",
+      "!dist/**/*.map",
+      "!node_modules/**/{CHANGELOG.md,README.md,README,readme.md,readme,*.markdown}",
+      "!node_modules/**/{test,__tests__,tests,powered-test,example,examples,doc,docs}",
       "!node_modules/**/*.d.ts",
       "!node_modules/**/*.map",
       "!node_modules/.bin",
+      "!node_modules/**/LICENSE",
+      "!node_modules/**/*.md",
       "!**/*.{iml,o,hprof,orig,pyc,pyo,rbc,swp,csproj,sln,xproj}",
       "!.editorconfig",
       "!**/._*",
       "!**/{.DS_Store,.git,.hg,.svn,CVS,RCS,SCCS,.gitignore,.gitattributes}",
       "!**/{__pycache__,thumbs.db,.flowconfig,.idea,.vs,.nyc_output}",
       "!**/{appveyor.yml,.travis.yml,circle.yml}",
-      "!**/{npm-debug.log,yarn.lock,.yarn-integrity,.yarn-metadata.json}"
+      "!**/{npm-debug.log,yarn.lock,.yarn-integrity,.yarn-metadata.json}",
+      "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme,*.markdown}",
+      "!**/node_modules/.cache"
     ],
     "asarUnpack": [
-      "node_modules/sqlite3/**/*"
+      "node_modules/sqlite3/build/Release/*.node"
     ],
     "compression": "maximum",
     "asar": true,
+    "nodeGypRebuild": false,
+    "buildDependenciesFromSource": false,
     "mac": {
       "icon": "build/icon.png",
       "target": {
@@ -143,7 +150,24 @@
           "x64"
         ]
       },
-      "category": "public.app-category.productivity"
+      "category": "public.app-category.productivity",
+      "electronLanguages": [
+        "en"
+      ]
+    },
+    "dmg": {
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
     },
     "win": {
       "icon": "build/icon.png",
