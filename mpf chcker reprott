@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+
+<html>
+<head>
+    <title>Model Points Validation Report</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+               margin: 40px; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; 
+                     padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h1 { color: #333; border-bottom: 2px solid #007bff; padding-bottom: 10px; }
+        h2 { color: #555; margin-top: 30px; }
+        .summary-cards { display: flex; gap: 20px; margin: 20px 0; flex-wrap: wrap; }
+        .card { padding: 20px; border-radius: 8px; min-width: 150px; text-align: center; }
+        .card-total { background: #e9ecef; }
+        .card-critical { background: #f8d7da; color: #721c24; }
+        .card-warning { background: #fff3cd; color: #856404; }
+        .card-info { background: #d1ecf1; color: #0c5460; }
+        .card h3 { margin: 0 0 10px 0; font-size: 14px; text-transform: uppercase; }
+        .card .number { font-size: 36px; font-weight: bold; }
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background: #f8f9fa; font-weight: 600; }
+        tr:hover { background: #f8f9fa; }
+        .badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+        .badge-critical { background: #dc3545; color: white; }
+        .badge-warning { background: #ffc107; color: #333; }
+        .badge-info { background: #17a2b8; color: white; }
+        code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-size: 12px; }
+        .status { font-size: 24px; font-weight: bold; margin: 20px 0; }
+        .timestamp { color: #888; font-size: 12px; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }
+        .stat-item { background: #f8f9fa; padding: 15px; border-radius: 6px; }
+        .stat-label { font-size: 12px; color: #666; text-transform: uppercase; }
+        .stat-value { font-size: 18px; font-weight: bold; color: #333; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Model Points Validation Report</h1>
+        <p class="timestamp">Generated: 2026-01-23 14:43:44</p>
+
+```
+    <div class="status"><span style="color: #dc3545;">⚠️ CRITICAL ISSUES FOUND</span></div>
+    
+    <div class="summary-cards">
+        <div class="card card-total">
+            <h3>Total Records</h3>
+            <div class="number">4</div>
+        </div>
+        <div class="card card-critical">
+            <h3>Critical Issues</h3>
+            <div class="number">8</div>
+        </div>
+        <div class="card card-warning">
+            <h3>Warnings</h3>
+            <div class="number">1</div>
+        </div>
+        <div class="card card-info">
+            <h3>Info</h3>
+            <div class="number">0</div>
+        </div>
+    </div>
+    
+    <h2>Validation Issues</h2>
+    
+    <table>
+        <thead>
+            <tr>
+                <th>Severity</th>
+                <th>Check</th>
+                <th>Description</th>
+                <th>Affected Rows</th>
+                <th>Field</th>
+                <th>Sample Values</th>
+            </tr>
+        </thead>
+        <tbody>
+            
+        <tr>
+            <td><span class="badge badge-critical">CRITICAL</span></td>
+            <td>Age at Entry - Too Low</td>
+            <td>Entry age below 16</td>
+            <td>1</td>
+            <td><code>AGE_AT_ENTRY</code></td>
+            <td><small>15</small></td>
+        </tr>
+        
+        <tr>
+            <td><span class="badge badge-critical">CRITICAL</span></td>
+            <td>Sex Code Validity</td>
+            <td>Invalid sex codes (valid: [0, 1, 9])</td>
+            <td>1</td>
+            <td><code>SEX</code></td>
+            <td><small>5</small></td>
+        </tr>
+        
+        <tr>
+            <td><span class="badge badge-critical">CRITICAL</span></td>
+            <td>Sub-Product Code Validity</td>
+            <td>Invalid SPCODE values (valid: [1, 2, 3])</td>
+            <td>1</td>
+            <td><code>SPCODE</code></td>
+            <td><small>99</small></td>
+        </tr>
+        
+        <tr>
+            <td><span class="badge badge-critical">CRITICAL</span></td>
+            <td>Premium Frequency Validity</td>
+            <td>Invalid premium frequency (valid: [1, 2, 4, 12])</td>
+            <td>1</td>
+            <td><code>PREM_FREQ</code></td>
+            <td><small>6</small></td>
+        </tr>
+        
+        <tr>
+            <td><span class="badge badge-critical">CRITICAL</span></td>
+            <td>File Type Validity</td>
+            <td>Invalid FILE_TYPE (valid: ['IF_NOW', 'NEW_BUS', 'LAPSED', 'SURRENDER', 'MATURITY', 'CLAIM'])</td>
+            <td>1</td>
+            <td><code>FILE_TYPE</code></td>
+            <td><small>INVALID</small></td>
+        </tr>
+        
+        <tr>
+            <td><span class="badge badge-critical">CRITICAL</span></td>
+            <td>Indicator Validity: STAFF_IND</td>
+            <td>STAFF_IND should only contain 0 or 1</td>
+            <td>1</td>
+            <td><code>STAFF_IND</code></td>
+            <td><small>2</small></td>
+        </tr>
+        
+        <tr>
+            <td><span class="badge badge-critical">CRITICAL</span></td>
+            <td>Duration vs Term</td>
+            <td>Duration in-force exceeds policy term</td>
+            <td>1</td>
+            <td><code>DURATIONIF_M</code></td>
+            <td><small>150</small></td>
+        </tr>
+        
+        <tr>
+            <td><span class="badge badge-critical">CRITICAL</span></td>
+            <td>Policy Number Uniqueness</td>
+            <td>Duplicate policy numbers found</td>
+            <td>2</td>
+            <td><code>POL_NUMBER</code></td>
+            <td><small>UG030000201, UG030000201</small></td>
+        </tr>
+        
+        <tr>
+            <td><span class="badge badge-warning">WARNING</span></td>
+            <td>Percentage Bounds: PESC_RATE_PC</td>
+            <td>PESC_RATE_PC outside 0-100 range</td>
+            <td>1</td>
+            <td><code>PESC_RATE_PC</code></td>
+            <td><small>150</small></td>
+        </tr>
+        
+        </tbody>
+    </table>
+    
+    
+    <h2>Data Summary</h2>
+    <div class="stats-grid">
+        <div class="stat-item">
+            <div class="stat-label">Total Columns</div>
+            <div class="stat-value">39</div>
+        </div>
+        
+        <div class="stat-item">
+            <div class="stat-label">IF_NOW</div>
+            <div class="stat-value">3</div>
+        </div>
+        
+        <div class="stat-item">
+            <div class="stat-label">INVALID</div>
+            <div class="stat-value">1</div>
+        </div>
+        
+    </div>
+    
+    <h2>Columns Present</h2>
+    <p><code>POL_NUMBER | SPCODE | AGE_AT_ENTRY | AGE2_ATENTRY | SEX | SEX2 | POL_TERM_Y | ADD_TERM_M | ADD_DTH_IND | DURATIONIF_M | UL_PREM | ADD_DTH_PREM | TPD_PREM | WOP_PREM | SINGLE_PREM | INIT_POLS_IF | INIT_UNFDU_A | INIT_UNFDU_C | PREM_FREQ | TPD_IND | PESC_RATE_PC | ADB_DTH_BEN | PREM_PAYBL_M | ALLOC_U_C_PC | FILE_TYPE | WAIV_IND_DTH | WAIV_IND_TPD | WOP_DTH | WOP_TPD | OPTION_PREM | EXTRA_AP_PP | ADD_DTH_BEN | AGE1_ATENTRY | STAFF_IND | MP_RES_PP | RI_SA | FIX_RI_PC | CURRENCY_MULTIPLIER | NEW_ALLOC_IND</code></p>
+</div>
+```
+
+</body>
+</html>
